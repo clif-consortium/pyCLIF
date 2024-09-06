@@ -1,0 +1,15 @@
+{
+  "patient": {
+    "patient_id": "VARCHAR",
+    "birth_date": "DATE",
+    "death_date": "DATE"
+  },
+  "hospitalization": {
+    "patient_id": "VARCHAR",
+    "hospitalization_id": "VARCHAR",
+    "admission_dttm": "DATETIME",
+    "discharge_dttm": "DATETIME",
+    "age_at_admission": "INTEGER",
+    "discharge_name": "VARCHAR"
+  }
+}

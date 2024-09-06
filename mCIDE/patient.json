@@ -1,0 +1,85 @@
+{
+  "mCIDE_mapping": {
+    "race_category": {
+      "American Indian or Alaska Native": ["American Indian or Alaska Native"],
+      "Asian": [
+        "Asian Indian",
+        "Asian/Mideast Indian",
+        "Chinese",
+        "Filipino",
+        "Japanese",
+        "Korean",
+        "Vietnamese",
+        "Other Asian",
+        "Asian"
+      ],
+      "Black or African American": [
+        "Black or African-American",
+        "Black or African American"
+      ],
+      "Native Hawaiian or Other Pacific Islander": [
+        "Native Hawaiian",
+        "Native Hawaiian/Other Pacific Islander",
+        "Guamanian or Chamorro",
+        "Samoan",
+        "Other Pacific Islander",
+        "Native Hawaiian or Other Pacific Islander"
+      ],
+      "White": ["White"],
+      "Other": [
+        "Other",
+        "More than one Race",
+        "Refusal",
+        "Unknown",
+        "None",
+        "Did Not Encounter"
+      ]
+    },
+    "ethnicity_category": {
+      "Hispanic or Latino": [
+        "Hispanic or Latino",
+        "Mexican, Mexican American, or Chicano/a",
+        "Puerto Rican",
+        "Cuban"
+      ],
+      "Not Hispanic or Latino": [
+        "Not Hispanic, Latino/a, or Spanish origin",
+        "Other Hispanic, Latino/a, or Spanish origin",
+        "Not Hispanic or Latino"
+      ],
+      "Unknown": [
+        "Patient declines to respond",
+        "Unknown or Patient unable to respond",
+        "*Unspecified",
+        "Did Not Encounter",
+        "Refusal",
+        "Unknown"
+      ]
+    },
+    "sex_category": {
+      "Male": ["Male"],
+      "Female": ["Female"],
+      "Unknown": ["Other", "Refused", "Unknown"]
+    }
+  },
+  "base_columns": [
+    "patient_id",
+    "race_category",
+    "ethnicity_category",
+    "sex_category",
+    "birth_date",
+    "death_date"
+  ],
+  "category_columns": {
+    "race_category": "race_name",
+    "ethnicity_category": "ethnicity_name",
+    "sex_category": "sex_name"
+  },
+  "temporal_columns": ["birth_date", "death_date"],
+  "heath_check_up": {
+    "check_id_duplicate": false,
+    "check_missing_columns": false,
+    "check_category": false,
+    "check_date_time_format": false
+  }
+}
