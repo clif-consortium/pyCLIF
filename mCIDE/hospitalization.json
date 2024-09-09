@@ -1,0 +1,44 @@
+{
+  "mCIDE_mapping": {
+    "discharge_category": {
+      "Home": ["Home"],
+      "Hospice": ["Hospice"],
+      "Acute Care Hospital": ["Acute Care Hospital"],
+      "Still Admitted": ["Still Admitted"],
+      "Inpatient Rehab Facility": ["Inpatient Rehab Facility"],
+      "Skilled Nursing Facility": ["Skilled Nursing Facility"],
+      "Long Term Care Hospital": ["Long Term Care Hospital"],
+      "Psychiatric Hospital": ["Psychiatric Hospital"],
+      "Dead": ["Dead"],
+      "Other": ["Other"]
+    }
+  },
+  "base_columns": [
+    "patient_id",
+    "hospitalization_id",
+    "admission_dttm",
+    "discharge_dttm",
+    "age_at_admission",
+    "discharge_name",
+    "discharge_category",
+    "zipcode_five_digit"
+  ],
+  "category_columns": {
+    "discharge_category": "discharge_name"
+  },
+  "temporal_columns": ["admission_dttm", "discharge_dttm"],
+  "extended_columns": [
+    "census_block_code",
+    "census_block_group_code",
+    "census_tract",
+    "state_code",
+    "county_code",
+    "zipcode_nine_digit"
+  ],
+  "heath_check_up": {
+    "check_id_duplicate": false,
+    "check_missing_columns": false,
+    "check_category": false,
+    "check_date_time_format": false
+  }
+}

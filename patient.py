@@ -16,6 +16,7 @@ class Patient:
         self.non_standard_columns = None
         self.site_mapping = None
         self.temporal_columns_to_fix = []
+        self.duck = duckdb
         self.get_duckdb_register()
 
     
@@ -36,7 +37,7 @@ class Patient:
             duckdb.register("patient", self.df)
     
     def load_json(self):
-        with open('cliflib/mCIDE/patient.json', 'r') as file:
+        with open('pyCLIF/mCIDE/patient.json', 'r') as file:
             data = json.load(file)  
         return data
     
@@ -219,7 +220,7 @@ class Patient:
             new_mappings['category_columns']=self.val_json['category_columns']
             
             # Generate export file name using current date and time
-            export_filename = f"site-specific-patient-mapping-{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            export_filename = f"Patient-SiteSpecific-{datetime.now().strftime('%Y%m%d')}.json"
             export_path = os.path.join(self.data_dir, export_filename)
             
             with open(export_path, 'w') as f:
