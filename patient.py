@@ -8,9 +8,10 @@ import os
 
 class Patient:
 
-    def __init__(self, df: pd.DataFrame,data_dir):
-        self.df = df
-        self.data_dir=data_dir
+    def __init__(self ,data_dir = None, df: pd.DataFrame = None, filetype='csv'):
+        self.filetype = filetype
+        self.data_dir = data_dir
+        self.df = df if df is not None else self.load_data()
         self.val_json = self.load_json()
         self.missing_columns = None
         self.non_standard_columns = None
@@ -40,6 +41,35 @@ class Patient:
         with open('pyCLIF/mCIDE/patient.json', 'r') as file:
             data = json.load(file)  
         return data
+
+    def load_mapping(self,mappings_path):
+        with open(mappings_path, 'r') as file:
+            data = json.load(file)  
+        return data
+    
+    def load_data(self):
+        """
+        Load the patient data from a file in the specified directory.
+
+        Returns:
+            pd.DataFrame: DataFrame containing patient data.
+        """
+        # Determine the file path based on the directory and filetype
+        file_path = os.path.join(self.data_dir, f"patient.{self.filetype}")
+        
+        # Load the data based on filetype
+        if os.path.exists(file_path):
+            if self.filetype == 'csv':
+                df = duckdb.read_csv(file_path).df()
+            elif self.filetype == 'parquet':
+                df = duckdb.read_parquet(file_path).df()
+            else:
+                raise ValueError("Unsupported filetype. Only 'csv' and 'parquet' are supported.")
+            print(f"Data loaded successfully from {file_path}")
+            return df
+        else:
+            raise FileNotFoundError(f"The file {file_path} does not exist in the specified directory.")
+
     
     def table_heath(self):
         for check, result in self.val_json["heath_check_up"].items():
@@ -97,20 +127,18 @@ class Patient:
             self.val_json['heath_check_up']['check_missing_columns']=True
 
     def check_category(self):
-
         to_check = list(self.val_json["category_columns"].keys())
         faults = len(to_check)
+
         # Iterate through category columns specified in val_json
         for col in to_check:
             # Check if the category column is in the DataFrame's columns
             if col not in self.get_columns():
                 print(f"❌ Fail: Missing column: {col}")
                 continue
-        
-            # Retrieve permissible values from mCIDE_mapping
-            permissible_values = set()
-            for category_name, values in self.val_json["mCIDE_mapping"][col].items():
-                permissible_values.update(values)
+            
+            # Retrieve permissible values from mCIDE_mapping (keys are the permissible values)
+            permissible_values = set(self.val_json["mCIDE_mapping"][col].keys())
 
             # Check if all values in the column are within the permissible values
             invalid_values = self.df[~self.df[col].isin(permissible_values)][col].unique()
@@ -119,12 +147,12 @@ class Patient:
                 print(f"❌ Fail: Invalid values found in '{col}': {invalid_values}")
             else:
                 print(f"✔️ Pass : All values in '{col}' are within the permissible values.")
-                faults-=1
-        
-        if faults!=0:
+                faults -= 1
+            
+        if faults != 0:
             print('''❌ Fail : Overall check_category()''')
         else:
-            self.val_json['heath_check_up']['check_category']=True
+            self.val_json['heath_check_up']['check_category'] = True
 
 
     def check_date_time_format(self):
@@ -182,16 +210,17 @@ class Patient:
             if value in values:
                 return category
         return 'No Mapping Found'  # Default category if value not found in mappings
-
-    def add_clif_category(self, mappings=None, export=True):
+    
+    def add_clif_category(self, mappings_path=None, export=True):
         
         # Use provided mappings or default to generic
-        if mappings is None:
+        if mappings_path is None:
             print("No site-specific mappings provided. Using default generic mappings for category assignment.")
             mappings = self.val_json['mCIDE_mapping']
         else:
             print("Using site-specific mappings for category assignment.")
-            self.site_mapping = mappings
+            self.site_mapping = self.load_mapping(mappings_path)
+            mappings=self.site_mapping
       
         
         for category_col, name_col in tqdm(self.val_json['category_columns'].items()):
@@ -208,7 +237,7 @@ class Patient:
                 print(f"  {row[name_col]} -> {row[category_col]}")
 
         # Create new mapping if export is True
-        if export:
+        if export and mappings_path is None:
             new_mappings = {}
             for category_col, name_col in self.val_json['category_columns'].items():
                 new_mappings[category_col] = {}
@@ -220,7 +249,7 @@ class Patient:
             new_mappings['category_columns']=self.val_json['category_columns']
             
             # Generate export file name using current date and time
-            export_filename = f"Patient-SiteSpecific-{datetime.now().strftime('%Y%m%d')}.json"
+            export_filename = f"Hospitalization-SiteSpecific-{datetime.now().strftime('%Y%m%d')}.json"
             export_path = os.path.join(self.data_dir, export_filename)
             
             with open(export_path, 'w') as f:

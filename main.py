@@ -24,12 +24,8 @@ class CLIF:
         self.lab = None
         self.patient = None
         self.hospitalization = None
-        print('CLIF Obj Initialized !!! ⛑️')
+        print('CLIF Object Initialized !!! ⛑️')
 
-    # def load_all_table__dtype_json(self):
-    #     with open('cliflib/mCIDE/all_table_dtype.json', 'r') as file:
-    #         data = json.load(file)  
-    #     return data
 
     def load(self, table_list=None):
         """
