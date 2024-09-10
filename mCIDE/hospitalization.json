@@ -13,16 +13,16 @@
       "Other": ["Other"]
     }
   },
-  "base_columns": [
-    "patient_id",
-    "hospitalization_id",
-    "admission_dttm",
-    "discharge_dttm",
-    "age_at_admission",
-    "discharge_name",
-    "discharge_category",
-    "zipcode_five_digit"
-  ],
+  "base_columns": {
+    "patient_id": "VARCHAR",
+    "hospitalization_id": "VARCHAR",
+    "admission_dttm": "DATETIME",
+    "discharge_dttm": "DATETIME",
+    "age_at_admission": "INTEGER",
+    "discharge_name": "VARCHAR",
+    "discharge_category": "VARCHAR",
+    "zipcode_five_digit": "VARCHAR"
+  },
   "category_columns": {
     "discharge_category": "discharge_name"
   },

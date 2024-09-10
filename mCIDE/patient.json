@@ -62,14 +62,14 @@
       "Unknown": ["Other", "Refused", "Unknown"]
     }
   },
-  "base_columns": [
-    "patient_id",
-    "race_category",
-    "ethnicity_category",
-    "sex_category",
-    "birth_date",
-    "death_date"
-  ],
+  "base_columns": {
+    "patient_id": "VARCHAR",
+    "race_category": "VARCHAR",
+    "ethnicity_category": "VARCHAR",
+    "sex_category": "VARCHAR",
+    "birth_date": "DATETIME",
+    "death_date": "DATETIME"
+  },
   "category_columns": {
     "race_category": "race_name",
     "ethnicity_category": "ethnicity_name",

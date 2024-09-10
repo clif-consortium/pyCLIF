@@ -9,6 +9,7 @@ import os
 class Hospitalization:
 
     def __init__(self ,data_dir = None, df: pd.DataFrame = None, filetype='csv'):
+        self.table_name = 'Hospitalization'
         self.filetype = filetype
         self.data_dir = data_dir
         self.df = df if df is not None else self.load_data()
@@ -20,13 +21,9 @@ class Hospitalization:
         self.duck = duckdb
         self.get_duckdb_register()
 
+
     def get_columns(self):
         return self.df.columns.tolist()
-    
-    def get_df(self,col=None):
-        if col is None:
-            col = self.val_json["base_columns"]
-        return self.df[col]
 
     def get_duckdb_register(self):
         try:
@@ -47,14 +44,14 @@ class Hospitalization:
         return data
     
     def load_data(self):
-            """
-            Load the hospitalization data from a file in the specified directory.
+            f"""
+            Load the {self.table_name} data from a file in the specified directory.
 
             Returns:
-                pd.DataFrame: DataFrame containing hospitalization data.
+                pd.DataFrame: DataFrame containing {self.table_name} data.
             """
             # Determine the file path based on the directory and filetype
-            file_path = os.path.join(self.data_dir, f"hospitalization.{self.filetype}")
+            file_path = os.path.join(self.data_dir, f"{self.table_name.lower()}.{self.filetype}")
             
             # Load the data based on filetype
             if os.path.exists(file_path):
@@ -76,7 +73,7 @@ class Hospitalization:
 
     def validate(self):
         print('++' * 30)
-        print(" " * 7,"CLIF Patient Table Checks")
+        print(" " * 7,"CLIF Hospitalization Table Checks")
         print('++' * 30)
         print(' '*5 + '⭐ CLIF Standard Columns:')
         print(self.val_json["base_columns"])
@@ -112,8 +109,9 @@ class Hospitalization:
     def check_missing_columns(self):
 
         current_columns = self.get_columns()
-        self.missing_columns = [col for col in self.val_json["base_columns"] if col not in current_columns]
-        self.non_standard_columns = [col for col in current_columns if col not in self.val_json["base_columns"]]
+        base_colums = list(self.val_json["base_columns"].keys())
+        self.missing_columns = [col for col in base_colums if col not in current_columns]
+        self.non_standard_columns = [col for col in current_columns if col not in base_colums]
 
         if len(self.non_standard_columns)>0:
             print("🥔 WHat if not Name? : Columns Not Part of CLIF Standard : ",self.non_standard_columns)

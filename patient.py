@@ -9,6 +9,7 @@ import os
 class Patient:
 
     def __init__(self ,data_dir = None, df: pd.DataFrame = None, filetype='csv'):
+        self.table_name = 'Patient'
         self.filetype = filetype
         self.data_dir = data_dir
         self.df = df if df is not None else self.load_data()
@@ -23,11 +24,6 @@ class Patient:
     
     def get_columns(self):
         return self.df.columns.tolist()
-    
-    def get_df(self,col=None):
-        if col is None:
-            col = self.val_json["base_columns"]
-        return self.df[col]
 
     def get_duckdb_register(self):
         try:
@@ -80,7 +76,7 @@ class Patient:
         print(" " * 7,"CLIF Patient Table Checks")
         print('++' * 30)
         print(' '*5 + '⭐ CLIF Standard Columns:')
-        print(self.val_json["base_columns"])
+        print(self.val_json["base_columns"].keys())
 
         for x in tqdm(list(self.val_json["heath_check_up"].keys()), desc='Processing Validation 🧪🧪🧪 '):
             if x=='check_id_duplicate':
@@ -115,8 +111,9 @@ class Patient:
     def check_missing_columns(self):
 
         current_columns = self.get_columns()
-        self.missing_columns = [col for col in self.val_json["base_columns"] if col not in current_columns]
-        self.non_standard_columns = [col for col in current_columns if col not in self.val_json["base_columns"]]
+        base_colums = list(self.val_json["base_columns"].keys())
+        self.missing_columns = [col for col in base_colums if col not in current_columns]
+        self.non_standard_columns = [col for col in current_columns if col not in base_colums]
 
         print("🥔 WHat if not Name? : Columns Not Part of CLIF Standard : ",self.non_standard_columns)
 
@@ -257,6 +254,24 @@ class Patient:
             print(f"\n 📄 Site-specific mapping exported successfully to {export_path}.")
         
         self.get_duckdb_register()
+
+    def fix_datetime_columns(self):
+        time_cols = self.val_json['temporal_columns']
+
+        for col in time_cols:
+            # Step 1: Convert to datetime, coerce errors to NaT
+            self.df[col] = pd.to_datetime(self.df[col], errors='coerce', infer_datetime_format=True)
+
+            # Step 2: Convert timezone-aware to timezone-naive
+            self.df[col] = self.df[col].apply(lambda x: x.tz_convert(None) if pd.notna(x) and x.tzinfo is not None else x)
+
+            # Step 3: Format datetime to the desired format
+            self.df[col] = self.df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+
+        self.get_duckdb_register()
+
+
+
 
 
 
