@@ -20,7 +20,6 @@ from .code_status import CodeStatus
 # CLIF 3.0 tables (new in 3.0; mcs replaces ecmo_mcs)
 from .mcs import Mcs
 from .renal_replacement_therapy import RenalReplacementTherapy
-from .intermittent_dialysis import IntermittentDialysis
 from .input import Input
 from .output import Output
 from .invasive_hemodynamics import InvasiveHemodynamics
@@ -67,7 +66,6 @@ __all__ = [
       # CLIF 3.0 tables
       'Mcs',
       'RenalReplacementTherapy',
-      'IntermittentDialysis',
       'Input',
       'Output',
       'InvasiveHemodynamics',

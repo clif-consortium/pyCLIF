@@ -143,7 +143,9 @@ def test_orchestrator_version_from_config(tmp_path):
 
 def test_30_schema_set_parses_and_is_consistent():
     files = sorted(glob.glob(os.path.join(SCHEMAS_ROOT, "3.0", "*_schema.yaml")))
-    assert len(files) == 42
+    # The CLIF 3.0.0 data dictionary defines exactly 40 tables: 15 beta,
+    # 13 alpha, 10 concept and 2 future-proposed.
+    assert len(files) == 40
     for fp in files:
         table = os.path.basename(fp).replace("_schema.yaml", "")
         s = yaml.safe_load(open(fp))

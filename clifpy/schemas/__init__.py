@@ -37,6 +37,11 @@ SUPPORTED_CLIF_VERSIONS = ("2.1", "3.0")
 _SCHEMA_NAME_OVERRIDES: Dict[str, Dict[str, str]] = {
     "3.0": {
         "ecmo_mcs": "mcs",
+        # CLIF 3.0 merged continuous and intermittent renal replacement into a
+        # single renal_replacement_therapy table; the intermittent modes are
+        # mode_category values (ihd, iuf), not a table of their own. There is
+        # no crrt_therapy in the 3.0.0 data dictionary.
+        "crrt_therapy": "renal_replacement_therapy",
     },
 }
 

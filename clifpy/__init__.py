@@ -22,7 +22,6 @@ from .tables import (
     # CLIF 3.0 tables (mcs replaces ecmo_mcs)
     Mcs,
     RenalReplacementTherapy,
-    IntermittentDialysis,
     Input,
     Output,
     InvasiveHemodynamics,
@@ -110,7 +109,6 @@ __all__ = [
     # CLIF 3.0 tables (mcs replaces ecmo_mcs)
     "Mcs",
     "RenalReplacementTherapy",
-    "IntermittentDialysis",
     "Input",
     "Output",
     "InvasiveHemodynamics",

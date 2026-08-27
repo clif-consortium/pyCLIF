@@ -32,7 +32,6 @@ from .tables.code_status import CodeStatus
 # CLIF 3.0 tables (new in 3.0; mcs replaces ecmo_mcs)
 from .tables.mcs import Mcs
 from .tables.renal_replacement_therapy import RenalReplacementTherapy
-from .tables.intermittent_dialysis import IntermittentDialysis
 from .tables.input import Input
 from .tables.output import Output
 from .tables.invasive_hemodynamics import InvasiveHemodynamics
@@ -83,7 +82,6 @@ TABLE_CLASSES = {
     # CLIF 3.0 tables (mcs replaces ecmo_mcs)
     'mcs': Mcs,
     'renal_replacement_therapy': RenalReplacementTherapy,
-    'intermittent_dialysis': IntermittentDialysis,
     'input': Input,
     'output': Output,
     'invasive_hemodynamics': InvasiveHemodynamics,
@@ -275,7 +273,6 @@ class ClifOrchestrator:
         # CLIF 3.0 tables (mcs replaces ecmo_mcs)
         self.mcs: Mcs = None
         self.renal_replacement_therapy: RenalReplacementTherapy = None
-        self.intermittent_dialysis: IntermittentDialysis = None
         self.input: Input = None
         self.output: Output = None
         self.invasive_hemodynamics: InvasiveHemodynamics = None
