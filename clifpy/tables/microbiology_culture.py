@@ -1,4 +1,5 @@
 from typing import Dict, List, Optional, Literal, Union
+from datetime import timedelta
 import pandas as pd
 import numpy as np
 import json
@@ -73,7 +74,11 @@ class MicrobiologyCulture(BaseTable):
         # Reset time order validation bucket
         self.time_order_validation_errors = []
 
-        df = self.df
+        # The stored polars frame. Reading .df instead would convert the whole
+        # table to pandas and cache that copy on the object for the rest of the
+        # session -- on the validation path, over full-size data. Only the
+        # violating rows are converted, at the return.
+        df = self.data
         key_cols = ["patient_id", "hospitalization_id", "organism_id"]
         time_cols = ["order_dttm", "collect_dttm", "result_dttm"]
 
@@ -94,13 +99,18 @@ class MicrobiologyCulture(BaseTable):
             self.logger.warning(msg)
             return None
 
-        grace = pd.Timedelta(minutes=1)
+        grace = timedelta(minutes=1)
 
         # Flag if order is ≥ 1 minute after collect (allow small jitter where collect ≥ order within 1 min)
         m_order_ge_collect = (df["order_dttm"] - df["collect_dttm"]) >= grace
 
         # Flag if collect is ≥ 1 minute after result (allow small jitter where result ≥ collect within 1 min)
         m_collect_ge_result = (df["collect_dttm"] - df["result_dttm"]) >= grace
+
+        # Nulls compare as null in polars, not False; a row missing a timestamp is
+        # not a violation, and sum()/any() would otherwise propagate the null.
+        m_order_ge_collect = m_order_ge_collect.fill_null(False)
+        m_collect_ge_result = m_collect_ge_result.fill_null(False)
 
         n1 = int(m_order_ge_collect.sum())
         n2 = int(m_collect_ge_result.sum())
@@ -132,7 +142,11 @@ class MicrobiologyCulture(BaseTable):
         any_bad = m_order_ge_collect | m_collect_ge_result
         if any_bad.any():
             show_cols = [*key_cols, "order_dttm", "collect_dttm", "result_dttm"]
-            return df.loc[any_bad, [c for c in show_cols if c in df.columns]].copy()
+            # Only the violating rows cross into pandas, to keep the documented
+            # pandas return type without materializing the whole table.
+            return df.filter(any_bad).select(
+                [c for c in show_cols if c in df.columns]
+            ).to_pandas()
 
         # Nothing to report
         self.logger.info("validate_timestamp_order: passed (no violations)")
@@ -223,7 +237,7 @@ class MicrobiologyCulture(BaseTable):
     def organism_group_cat_name_map(self, include_counts: bool = False, **kwargs):
         # {organism_group: {organism_category: [organism_name,...]}}
         return MicrobiologyCulture.cat_vs_name_map(
-            self.df,
+            self.data.to_pandas(),
             category_col="organism_category",
             name_col="organism_name",
             group_col="organism_group",
@@ -234,7 +248,7 @@ class MicrobiologyCulture(BaseTable):
     def organism_cat_name_map(self, include_counts: bool = False, **kwargs):
         # {organism_category: [organism_name,...]}
         return MicrobiologyCulture.cat_vs_name_map(
-            self.df,
+            self.data.to_pandas(),
             category_col="organism_category",
             name_col="organism_name",
             include_counts=include_counts,
@@ -244,7 +258,7 @@ class MicrobiologyCulture(BaseTable):
     def fluid_cat_name_map(self, include_counts: bool = False, **kwargs):
         # {fluid_category: [fluid_name,...]}
         return MicrobiologyCulture.cat_vs_name_map(
-            self.df,
+            self.data.to_pandas(),
             category_col="fluid_category",
             name_col="fluid_name",
             include_counts=include_counts,
@@ -268,7 +282,11 @@ class MicrobiologyCulture(BaseTable):
         Returns:
             Dict with keys "top_positive" and "top_negative", each containing a DataFrame of outliers.
         """
-        tbl = pd.crosstab(self.df["fluid_category"], self.df[level])
+        # pd.crosstab plus the numpy chi-square residual maths below is
+        # pandas-native, so this path stays pandas -- but it is converted once,
+        # from .data, instead of twice through the caching .df property.
+        frame = self.data.to_pandas()
+        tbl = pd.crosstab(frame["fluid_category"], frame[level])
         if tbl.empty:
             return {"top_positive": pd.DataFrame(), "top_negative": pd.DataFrame()}
 

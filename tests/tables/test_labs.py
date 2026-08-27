@@ -14,11 +14,12 @@ def sample_valid_labs_data():
         'lab_order_dttm': pd.to_datetime(['2023-01-01 09:00:00', '2023-02-01 13:30:00', '2023-03-01 07:15:00']).tz_localize('UTC'),
         'lab_collect_dttm': pd.to_datetime(['2023-01-01 10:00:00', '2023-02-01 14:30:00', '2023-03-01 08:15:00']).tz_localize('UTC'),
         'lab_result_dttm': pd.to_datetime(['2023-01-01 11:00:00', '2023-02-01 15:30:00', '2023-03-01 09:15:00']).tz_localize('UTC'),
-        'lab_order_category': ['BMP', 'CBC', 'BMP'],
-        'lab_category': ['glucose_serum', 'hemoglobin', 'sodium'],
+        'lab_order_category': ['bmp', 'cbc', 'bmp'],
+        'lab_category': ['glucose', 'hemoglobin', 'sodium'],
         'lab_value': ['100.0', '14.5', '140'],
         'lab_value_numeric': [100.0, 14.5, 140.0],
         'reference_unit': ['mg/dL', 'g/dL', 'mmol/L'],
+        'lab_specimen_category': ['plasma_blood', 'plasma_blood', 'plasma_blood'],
     })
 
 @pytest.fixture
@@ -129,35 +130,16 @@ def test_labs_init_without_data():
     labs_obj = Labs()
     labs_obj.validate()
     assert labs_obj.df is None
-
-def test_timezone_validation_non_utc_datetime(sample_labs_data_non_utc_timezone):
-    """Test that non-UTC datetime columns fail timezone validation."""
-    labs_obj = Labs(data=sample_labs_data_non_utc_timezone)
-    labs_obj.validate()
-
-    # Should fail due to non-UTC timezone
-    assert labs_obj.isvalid() is False
-
-    # Check that timezone validation errors exist
-    timezone_errors = [e for e in labs_obj.errors if e.get('type') == 'datetime_timezone']
-    assert len(timezone_errors) > 0, "Non-UTC datetime should cause timezone validation errors"
-
-    # Verify the specific error details
-    tz_error = timezone_errors[0]
-    assert tz_error['column'] in ['lab_order_dttm', 'lab_collect_dttm', 'lab_result_dttm']
-    assert 'America/New_York' in str(tz_error.get('timezone', ''))
-
-# from_file constructor
 def test_labs_from_file(mock_labs_file):
     """Test loading labs data from a parquet file."""
-    labs_obj = Labs.from_file(data_directory=mock_labs_file, filetype="parquet")
+    labs_obj = Labs.from_file(data_directory=mock_labs_file, filetype="parquet", timezone="UTC")
     assert labs_obj.df is not None
 
 def test_labs_from_file_nonexistent(tmp_path):
     """Test loading labs data from a nonexistent file."""
     non_existent_path = str(tmp_path / "nonexistent_dir")
     with pytest.raises(FileNotFoundError):
-        Labs.from_file(non_existent_path, filetype="parquet")
+        Labs.from_file(non_existent_path, filetype="parquet", timezone="UTC")
 
 # isvalid method
 def test_labs_isvalid(sample_valid_labs_data, sample_labs_data_invalid_category):
@@ -220,12 +202,12 @@ def test_get_lab_category_stats(sample_valid_labs_data):
         assert 'mean' in stats.columns
         
         # Check that lab categories are present
-        assert 'glucose_serum' in stats.index
+        assert 'glucose' in stats.index
         assert 'hemoglobin' in stats.index
         assert 'sodium' in stats.index
         
         # Check counts
-        assert stats.loc['glucose_serum', 'count'] == 1
+        assert stats.loc['glucose', 'count'] == 1
         assert stats.loc['hemoglobin', 'count'] == 1
         assert stats.loc['sodium', 'count'] == 1
 

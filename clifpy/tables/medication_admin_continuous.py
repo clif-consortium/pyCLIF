@@ -1,5 +1,6 @@
-from typing import Optional, Dict, Tuple, Union, Set
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import pandas as pd
+import polars as pl
 from pyarrow import BooleanArray
 from .base_table import BaseTable
 import duckdb
@@ -120,3 +121,106 @@ class MedicationAdminContinuous(BaseTable):
     
     def resolve_mar_action_duplicates(self) -> pd.DataFrame:
         pass
+
+    # ------------------------------------------------------------------
+    # Medication Admin Continuous Specific Methods
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _value_counts(data, col):
+        """value_counts().to_dict() with pandas' semantics.
+
+        pandas excludes NaN and orders by descending count; polars keeps null
+        as its own category, so the nulls are dropped explicitly.
+        """
+        vc = data.get_column(col).drop_nulls().value_counts(sort=True)
+        return dict(zip(vc.get_column(col).to_list(), vc.get_column('count').to_list()))
+
+    def get_med_categories(self) -> List[str]:
+        """Return the unique medication categories present in the data."""
+        if self.data is None or 'med_category' not in self.data.columns:
+            return []
+        # maintain_order reproduces pandas' unique(), which returns values in
+        # order of first appearance; polars' unique() is unordered by default.
+        return (
+            self.data.get_column('med_category')
+            .drop_nulls().unique(maintain_order=True).to_list()
+        )
+
+    def get_med_groups(self) -> List[str]:
+        """Return the unique medication groups present in the data."""
+        if self.data is None or 'med_group' not in self.data.columns:
+            return []
+        return (
+            self.data.get_column('med_group')
+            .drop_nulls().unique(maintain_order=True).to_list()
+        )
+
+    def filter_by_med_group(self, med_group: str) -> pd.DataFrame:
+        """Return all records for one medication group."""
+        if self.data is None or 'med_group' not in self.data.columns:
+            return pd.DataFrame()
+        # Filtered in polars; only the matching subset becomes pandas.
+        return self.data.filter(pl.col('med_group') == med_group).to_pandas()
+
+    def get_summary_stats(self) -> Dict[str, Any]:
+        """Return summary statistics for the continuous medication data."""
+        if self.data is None:
+            return {}
+
+        data = self.data          # bound once; the table is never converted
+        cols = data.columns
+
+        stats = {
+            'total_records': data.height,
+            'unique_hospitalizations': (
+                # drop_nulls before n_unique matches pandas' nunique()
+                data.get_column('hospitalization_id').drop_nulls().n_unique()
+                if 'hospitalization_id' in cols else 0
+            ),
+            'med_category_counts': (
+                self._value_counts(data, 'med_category') if 'med_category' in cols else {}
+            ),
+            'med_group_counts': (
+                self._value_counts(data, 'med_group') if 'med_group' in cols else {}
+            ),
+            'date_range': {
+                'earliest': (
+                    data.get_column('admin_dttm').min() if 'admin_dttm' in cols else None
+                ),
+                'latest': (
+                    data.get_column('admin_dttm').max() if 'admin_dttm' in cols else None
+                ),
+            },
+        }
+
+        if 'med_group' in cols and 'med_dose' in cols:
+            dose_stats = {}
+            # One grouped pass replaces the per-group filter loop, which called
+            # filter_by_med_group twice per group.
+            grouped = (
+                data
+                .drop_nulls(subset=['med_group'])
+                .with_columns(pl.col('med_dose').cast(pl.Float64, strict=False))
+                .drop_nulls(subset=['med_dose'])
+                .group_by('med_group')
+                .agg(
+                    pl.len().alias('count'),
+                    pl.col('med_dose').mean().alias('mean_dose'),
+                    pl.col('med_dose').min().alias('min_dose'),
+                    pl.col('med_dose').max().alias('max_dose'),
+                )
+            )
+            by_group = {r['med_group']: r for r in grouped.iter_rows(named=True)}
+            # Iterating get_med_groups() keeps the original insertion order.
+            for group in self.get_med_groups():
+                row = by_group.get(group)
+                if row is not None:
+                    dose_stats[group] = {
+                        'count': row['count'],
+                        'mean_dose': round(row['mean_dose'], 3),
+                        'min_dose': row['min_dose'],
+                        'max_dose': row['max_dose'],
+                    }
+            stats['dose_stats_by_group'] = dose_stats
+
+        return stats

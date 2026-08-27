@@ -80,11 +80,15 @@ class RespiratorySupport(BaseTable):
         different timezone, it will be converted to UTC for processing, then converted
         back to the original timezone on return. The original object is not modified.
         """
-        if self.df is None or self.df.empty:
+        if self.data is None or self.data.is_empty():
             raise ValueError("No data available to process. Load data first.")
 
-        # Work on a copy
-        df_copy = self.df.copy()
+        # process_resp_support_waterfall (utils/waterfall.py:8) is pandas-native,
+        # so this path stays pandas. Converting from .data explicitly gives the
+        # same frame without populating -- and then permanently holding -- the
+        # cached pandas view on the table. to_pandas() already returns a fresh
+        # frame, so the .copy() it replaces is not needed.
+        df_copy = self.data.to_pandas()
 
         # --- Capture original tz (if any), convert to UTC for processing
         original_tz = None

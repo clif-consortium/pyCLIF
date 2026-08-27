@@ -146,9 +146,10 @@ class BaseTable:
         # polars are both accepted here and normalized on the way in.
         self._data: Optional[pl.DataFrame] = None
         self._df_pandas: Optional[pd.DataFrame] = None
-        self.df = data
+        self.data = data
 
         self.errors: List[Dict[str, Any]] = []
+        self.warnings: List[Dict[str, Any]] = []
         self.schema: Optional[Dict[str, Any]] = None
         self.outlier_config: Optional[Dict[str, Any]] = None
         self._validated: bool = False
@@ -166,10 +167,11 @@ class BaseTable:
     # ------------------------------------------------------------------
     # Data access
     # ------------------------------------------------------------------
-    # The canonical frame is polars (``self._data``). ``df`` stays the public
-    # attribute and still hands back pandas, because ~20 modules and every
-    # downstream analysis read it that way. The conversion is done once and
-    # cached, so code that never touches ``.df`` never pays for it.
+    # The canonical frame is polars (``self._data``), read and written through
+    # ``data``. ``df`` remains as the pandas view: its getter converts once and
+    # caches, because modules outside clifpy/tables/ and downstream analyses
+    # still read it that way; its setter is a pure alias for ``data``'s.
+    # Code that never touches ``.df`` never builds the pandas copy.
 
     @property
     def df(self) -> Optional[pd.DataFrame]:
@@ -186,6 +188,27 @@ class BaseTable:
 
     @df.setter
     def df(self, value) -> None:
+        """Write through to :attr:`data`.
+
+        Kept because ``self.df = <frame>`` is the historical write path and is
+        still used across the package and by downstream callers. It converts
+        nothing on the way in -- the work is in the ``data`` setter -- so this
+        is a pure alias and is unaffected by ``.df``'s pandas-returning getter.
+        """
+        self.data = value
+
+    @property
+    def data(self) -> Optional[pl.DataFrame]:
+        """The table as a polars DataFrame -- the stored representation."""
+        return self._data
+
+    @data.setter
+    def data(self, value) -> None:
+        """Store a frame, accepting pandas, polars, or a polars LazyFrame.
+
+        This is the canonical write path. Assigning polars stores it as-is;
+        pandas is converted once here so everything downstream is polars.
+        """
         if value is None:
             self._data = None
         elif isinstance(value, pl.DataFrame):
@@ -212,15 +235,36 @@ class BaseTable:
                 self._data = pl.from_pandas(coerced)
         else:
             raise TypeError(
-                f"{self.__class__.__name__}.df accepts a pandas DataFrame, polars "
+                f"{self.__class__.__name__}.data accepts a pandas DataFrame, polars "
                 f"DataFrame, or polars LazyFrame; got {type(value).__name__}."
             )
         self._df_pandas = None  # invalidate the cached conversion
 
-    @property
-    def data(self) -> Optional[pl.DataFrame]:
-        """The table as a polars DataFrame -- the stored representation."""
-        return self._data
+    def _warn_if_pandas_view_diverged(self) -> None:
+        """Warn when the cached pandas view has been edited in place.
+
+        ``.df`` hands back a cached pandas *conversion*. Editing that frame --
+        ``table.df['site'] = site`` -- changes only the conversion; ``_data``,
+        which every validation and summary path reads, never sees it. The edit
+        then silently does not exist as far as validation is concerned.
+
+        Comparing column names and row counts catches the shape-changing edits
+        that pattern produces. It cannot catch an in-place value edit, so this
+        narrows the failure rather than closing it; the real fix is to assign
+        back (``table.data = edited``), which routes through the setter.
+        """
+        twin = self._df_pandas
+        if twin is None or self._data is None:
+            return
+        if list(twin.columns) == list(self._data.columns) and len(twin) == self._data.height:
+            return
+        self.logger.warning(
+            "The pandas view returned by .df has been modified in place; those "
+            "changes are NOT in the data being validated. .df is a cached "
+            "conversion -- assign back with `%s.data = <edited frame>` to make "
+            "an edit take effect, or work on .data (polars) directly.",
+            self.table_name,
+        )
 
     def _setup_logging(self):
         """Set up table-specific logging (supplementary to centralized logs)."""
@@ -390,11 +434,14 @@ class BaseTable:
         - Table-specific validations (if overridden in child class)
         """
         if self._data is None:
-            self.logger.warning("No dataframe to validate")
+            self.logger.warning("No dataframe to validate.")
             return
+
+        self._warn_if_pandas_view_diverged()
 
         self.logger.info("Starting validation")
         self.errors = []
+        self.warnings = []
         self._validated = True
 
         try:
@@ -403,15 +450,32 @@ class BaseTable:
             # instead of round-tripping through pandas.
             if self.schema:
                 self.logger.info("Running schema validation")
-                schema_errors = validator.validate_dataframe(
+                findings = validator.validate_dataframe(
                     self._data, self.schema, clif_version=self.clif_version
                 )
-                self.errors.extend(schema_errors)
 
-                if schema_errors:
-                    self.logger.warning(f"Schema validation found {len(schema_errors)} errors")
+                # Only conformance findings mean the data does not match the
+                # schema. Completeness and plausibility findings (an mCIDE value
+                # this site never records, a shifted distribution, a mostly-null
+                # column) describe the shape of the dataset -- real DQA output,
+                # but not grounds for calling the table invalid. Folding them in
+                # made isvalid() False for every site that does not exercise
+                # every permissible value.
+                for finding in findings:
+                    if finding.get('check_group', 'conformance') == 'conformance':
+                        self.errors.append(finding)
+                    else:
+                        self.warnings.append(finding)
+
+                if self.errors:
+                    self.logger.warning(f"Schema validation found {len(self.errors)} errors")
                 else:
                     self.logger.info("Schema validation passed")
+                if self.warnings:
+                    self.logger.info(
+                        f"Data quality checks raised {len(self.warnings)} finding(s). "
+                        "See `warnings` attribute."
+                    )
 
             # Run enhanced validations (these will be implemented in Phase 3)
             self._run_enhanced_validations()
@@ -421,12 +485,13 @@ class BaseTable:
 
             # Log validation results
             if not self.errors:
-                self.logger.info("Validation completed successfully")
+                self.logger.info("Validation completed successfully.")
             else:
                 self.logger.warning(f"Validation completed with {len(self.errors)} error(s). See `errors` attribute.")
 
-                # Save errors to CSV
-                self._save_validation_errors()
+            # Persist both, so the DQA findings are not lost just because the
+            # table conforms.
+            self._save_validation_errors()
 
         except Exception as e:
             self.logger.error(f"Error during validation: {str(e)}")
@@ -472,13 +537,14 @@ class BaseTable:
         pass
     
     def _save_validation_errors(self):
-        """Save validation errors to a CSV file."""
-        if not self.errors:
+        """Save validation errors and data quality findings to a CSV file."""
+        findings = self.errors + self.warnings
+        if not findings:
             return
-        
+
         try:
-            # Convert errors to DataFrame
-            errors_df = pd.DataFrame(self.errors)
+            # Convert findings to DataFrame
+            errors_df = pd.DataFrame(findings)
             
             # Save to CSV
             error_file = os.path.join(
@@ -495,6 +561,10 @@ class BaseTable:
     def isvalid(self) -> bool:
         """
         Check if the data is valid based on the last validation run.
+
+        "Valid" means the data conforms to the CLIF schema. Data quality
+        findings from the completeness and plausibility checks live in
+        ``warnings`` and do not affect this result.
 
         Returns:
             bool: True if validation has been run and no errors were found,
@@ -524,6 +594,7 @@ class BaseTable:
             "memory_usage_mb": data.estimated_size() / 1024 / 1024,
             "validation_run": self._validated,
             "validation_errors": len(self.errors) if self._validated else None,
+            "data_quality_findings": len(self.warnings) if self._validated else None,
             "is_valid": self.isvalid()
         }
 

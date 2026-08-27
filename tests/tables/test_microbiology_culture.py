@@ -15,16 +15,17 @@ def sample_valid_microbiology_data():
     return pd.DataFrame({
         'patient_id': ['12345', '12345', '67890'],
         'hospitalization_id': ['HOSP12345', 'HOSP12345', 'HOSP67890'],
+        'order_id': ['ORD001', 'ORD001', 'ORD002'],
         'organism_id': ['ORG001', 'ORG002', 'ORG003'],
         'order_dttm': pd.to_datetime(['2025-06-05 08:15:00+00:00', '2025-06-05 08:15:00+00:00', '2025-06-10 14:10:00+00:00']),
         'collect_dttm': pd.to_datetime(['2025-06-05 08:45:00+00:00', '2025-06-05 08:45:00+00:00', '2025-06-10 14:35:00+00:00']),
         'result_dttm': pd.to_datetime(['2025-06-06 12:00:00+00:00', '2025-06-06 12:00:00+00:00', '2025-06-11 09:20:00+00:00']),
         'fluid_name': ['AFB/FUNGAL BLOOD CULTURE', 'AFB/FUNGAL BLOOD CULTURE', 'BRAIN BIOPSY CULTURE'],
-        'fluid_category': ['blood_buffy_coat', 'blood_buffy_coat', 'brain'],
+        'fluid_category': ['blood_buffy', 'blood_buffy', 'brain'],
         'method_name': ['Blood culture', 'Blood culture', 'Tissue culture'],
         'method_category': ['culture', 'culture', 'culture'],
         'organism_name': ['Acinetobacter baumanii', 'Candida albicans', 'Aspergillus fumigatus'],
-        'organism_category': ['some_acinetobacter_category', 'some_candida_category', 'some_aspergillus_category'],
+        'organism_category': ['acinetobacter_baumannii', 'candida_albicans', 'aspergillus_fumigatus'],
         'organism_group': ['acinetobacter', 'candida_albicans', 'aspergillus_fumigatus'],
         'lab_loinc_code': ['', '', '']
     })
@@ -35,13 +36,14 @@ def sample_invalid_microbiology_data_schema():
     return pd.DataFrame({
         'patient_id': ['12345'],
         'hospitalization_id': ['HOSP12345'],
+        'order_id': ['ORD001'],
         'organism_id': [123],  # Invalid data type for organism_id, schema expects VARCHAR
         'order_dttm': pd.to_datetime(['2025-06-05 08:15:00+00:00']),
         'collect_dttm': pd.to_datetime(['2025-06-05 08:45:00+00:00']),
         'result_dttm': pd.to_datetime(['2025-06-06 12:00:00+00:00']),
-        'fluid_category': ['blood_buffy_coat'],
+        'fluid_category': ['blood_buffy'],
         'method_category': ['culture'],
-        'organism_category': ['some_acinetobacter_category']
+        'organism_category': ['acinetobacter_baumannii']
     })
 
 @pytest.fixture
@@ -50,13 +52,14 @@ def sample_invalid_microbiology_data_organisms():
     return pd.DataFrame({
         'patient_id': ['12345', '67890'],
         'hospitalization_id': ['HOSP12345', 'HOSP67890'],
+        'order_id': ['ORD001', 'ORD002'],
         'organism_id': ['ORG001', 'ORG002'],
         'order_dttm': pd.to_datetime(['2025-06-05 08:15:00+00:00', '2025-06-10 14:10:00+00:00']),
         'collect_dttm': pd.to_datetime(['2025-06-05 08:45:00+00:00', '2025-06-10 14:35:00+00:00']),
         'result_dttm': pd.to_datetime(['2025-06-06 12:00:00+00:00', '2025-06-11 09:20:00+00:00']),
-        'fluid_category': ['blood_buffy_coat', 'brain'],
+        'fluid_category': ['blood_buffy', 'brain'],
         'method_category': ['culture', 'culture'],  # valid method
-        'organism_category': ['any_organism_category', 'another_organism_category'],  # unrestricted
+        'organism_category': ['acinetobacter_baumannii', 'candida_albicans'],
         'organism_group': ['unknown_group', 'invalid_organism_group']  # invalid organism groups
     })
 
@@ -66,13 +69,14 @@ def sample_microbiology_data_group_mismatch():
     return pd.DataFrame({
         'patient_id': ['12345'],
         'hospitalization_id': ['HOSP12345'],
+        'order_id': ['ORD001'],
         'organism_id': ['ORG001'],
         'order_dttm': pd.to_datetime(['2025-06-05 08:15:00+00:00']),
         'collect_dttm': pd.to_datetime(['2025-06-05 08:45:00+00:00']),
         'result_dttm': pd.to_datetime(['2025-06-06 12:00:00+00:00']),
-        'fluid_category': ['blood_buffy_coat'],
+        'fluid_category': ['blood_buffy'],
         'method_category': ['culture'],
-        'organism_category': ['any_acinetobacter_category'],  # unrestricted
+        'organism_category': ['acinetobacter_baumannii'],  # unrestricted
         'organism_group': ['invalid_group']  # Invalid organism group
     })
 
@@ -82,13 +86,14 @@ def sample_microbiology_data_invalid_timestamps():
     return pd.DataFrame({
         'patient_id': ['12345', '67890'],
         'hospitalization_id': ['HOSP12345', 'HOSP67890'],
+        'order_id': ['ORD001', 'ORD002'],
         'organism_id': ['ORG001', 'ORG002'],
         'order_dttm': pd.to_datetime(['2025-06-05 10:00:00+00:00', '2025-06-10 16:00:00+00:00']),  # order after collect
         'collect_dttm': pd.to_datetime(['2025-06-05 08:45:00+00:00', '2025-06-10 14:35:00+00:00']),
         'result_dttm': pd.to_datetime(['2025-06-06 12:00:00+00:00', '2025-06-10 14:00:00+00:00']),  # result before collect
-        'fluid_category': ['blood_buffy_coat', 'brain'],
+        'fluid_category': ['blood_buffy', 'brain'],
         'method_category': ['culture', 'culture'],
-        'organism_category': ['any_acinetobacter_category', 'any_aspergillus_category'],  # unrestricted
+        'organism_category': ['acinetobacter_baumannii', 'aspergillus_fumigatus'],  # unrestricted
         'organism_group': ['acinetobacter', 'aspergillus_fumigatus']
     })
 
@@ -352,6 +357,7 @@ def test_microbiology_culture_init_with_invalid_category(patch_microbiology_sche
     """Test microbiology culture initialization with organism group values."""
     mc_obj = MicrobiologyCulture(data=sample_invalid_microbiology_data_organisms)
     mc_obj.validate()
+    # organism_group values are not schema-validated; group checking lives elsewhere.
     assert mc_obj.isvalid() is True
 
 def test_microbiology_culture_init_with_schema_violations(patch_microbiology_schema_path, sample_invalid_microbiology_data_schema):
@@ -379,14 +385,14 @@ def test_microbiology_culture_organism_group_mismatch(patch_microbiology_schema_
 # from_file constructor
 def test_microbiology_culture_from_file(patch_microbiology_schema_path, mock_microbiology_file):
     """Test loading microbiology culture data from a parquet file."""
-    mc_obj = MicrobiologyCulture.from_file(data_directory=mock_microbiology_file, filetype="parquet")
+    mc_obj = MicrobiologyCulture.from_file(data_directory=mock_microbiology_file, filetype="parquet", timezone="UTC")
     assert mc_obj.df is not None
 
 def test_microbiology_culture_from_file_nonexistent(patch_microbiology_schema_path, tmp_path):
     """Test loading microbiology culture data from a nonexistent file."""
     non_existent_path = str(tmp_path / "nonexistent_dir")
     with pytest.raises(FileNotFoundError):
-        MicrobiologyCulture.from_file(non_existent_path, filetype="parquet")
+        MicrobiologyCulture.from_file(non_existent_path, filetype="parquet", timezone="UTC")
 
 # isvalid method
 def test_microbiology_culture_isvalid(patch_microbiology_schema_path, sample_valid_microbiology_data, sample_invalid_microbiology_data_organisms):
@@ -395,7 +401,7 @@ def test_microbiology_culture_isvalid(patch_microbiology_schema_path, sample_val
     valid_mc.validate()
     assert valid_mc.isvalid() is True
 
-    # Note: organism groups validation is handled by other modules
+    # Note: organism group validation is handled by other modules
     invalid_mc = MicrobiologyCulture(data=sample_invalid_microbiology_data_organisms)
     invalid_mc.validate()
     assert invalid_mc.isvalid() is True# validate method
@@ -411,7 +417,6 @@ def test_microbiology_culture_validate_output(patch_microbiology_schema_path, sa
     invalid_mc = MicrobiologyCulture(data=sample_invalid_microbiology_data_organisms)
     invalid_mc.validate()
     captured = capsys.readouterr()
-    assert "Validation completed successfully" in captured.out
     assert "Validation completed successfully" in captured.out
     
     # No data
@@ -459,8 +464,9 @@ def test_microbiology_culture_timestamp_order_method_direct(patch_microbiology_s
     for col in expected_cols:
         assert col in violating_rows.columns
     
-    # Should also have some key columns
-    key_cols = mc_obj.schema['composite_keys']
+    # Should also retain the identifying columns. The versioned YAML schema has
+    # no 'composite_keys'; validate_timestamp_order defines the set it keeps.
+    key_cols = ["patient_id", "hospitalization_id", "organism_id"]
     for col in key_cols:
         if col in mc_obj.df.columns:
             assert col in violating_rows.columns

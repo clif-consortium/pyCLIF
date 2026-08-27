@@ -559,21 +559,25 @@ class TestClifOrchestratorStitching:
         assert len(clif.encounter_mapping) == 2
         assert set(clif.encounter_mapping.columns) == {'hospitalization_id', 'encounter_block'}
     
-    def test_stitch_encounters_without_loaded_tables(self):
-        """Test that stitching warns if tables not loaded."""
+    def test_stitch_encounters_auto_loads_required_tables(self, sample_data_dir):
+        """run_stitch_encounters loads hospitalization/adt itself.
+
+        It used to warn and no-op when they were missing; it now loads
+        whichever is absent so that loading alone cannot short-circuit the
+        stitch.
+        """
         clif = ClifOrchestrator(
-            data_directory=".",
+            data_directory=sample_data_dir,
             filetype='parquet',
             timezone='US/Eastern',
             stitch_encounter=True  # Enable stitching
         )
-        
-        # Initialize without loading required tables
-        # Should print warning about requiring hospitalization and ADT
-        clif.initialize([])  # Empty list, no tables loaded
-        
-        # encounter_mapping should remain None
-        assert clif.encounter_mapping is None
+
+        clif.initialize([])  # Empty list: nothing explicitly requested
+
+        assert clif.hospitalization is not None
+        assert clif.adt is not None
+        assert clif.encounter_mapping is not None
     
     def test_clif_orchestrator_auto_stitch_on_init(self, sample_data_dir):
         """Test automatic stitching when enabled in constructor."""
@@ -603,22 +607,22 @@ class TestClifOrchestratorStitching:
         h002_block = mapping[mapping['hospitalization_id'] == 'H002']['encounter_block'].iloc[0]
         assert h001_block == h002_block
     
-    def test_get_encounter_mapping_before_stitching(self, sample_data_dir):
-        """Test get_encounter_mapping returns None before stitching."""
+    def test_get_encounter_mapping_stitches_on_demand(self, sample_data_dir):
+        """get_encounter_mapping stitches lazily instead of returning None."""
         clif = ClifOrchestrator(
             data_directory=sample_data_dir,
             filetype='parquet',
             timezone='US/Eastern'
         )
-        
-        # Before stitching, should return None
-        assert clif.get_encounter_mapping() is None
-        
-        # After loading tables but before stitching
-        clif.initialize(['hospitalization', 'adt'])
-        assert clif.get_encounter_mapping() is None
-        
-        # Enable stitching and re-initialize
+
+        # Nothing stitched yet, so the attribute itself is still unset
+        assert clif.encounter_mapping is None
+
+        # Asking for it triggers run_stitch_encounters()
+        assert clif.get_encounter_mapping() is not None
+        assert clif.encounter_mapping is not None
+
+        # Explicit stitching keeps working
         clif.stitch_encounter = True
         clif.stitch_time_interval = 6
         clif.initialize(['hospitalization', 'adt'])

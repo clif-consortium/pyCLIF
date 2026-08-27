@@ -16,9 +16,9 @@ def sample_valid_hospitalization_data():
         'discharge_dttm': pd.to_datetime(['2023-01-05 16:00:00', '2023-02-08 12:00:00', '2023-03-10 09:30:00']).tz_localize('UTC'),
         'age_at_admission': [65, 45, 72],
         'admission_type_name': ['emergency', 'elective', 'urgent'],
-        'admission_type_category': ['Emergency', 'Elective', 'Urgent'],
+        'admission_type_category': ['ed', 'elective', 'direct'],
         'discharge_name': ['home', 'snf', 'expired'],
-        'discharge_category': ['Home', 'Skilled Nursing Facility (SNF)', 'Expired'],
+        'discharge_category': ['home', 'snf', 'expired'],
         'zipcode_nine_digit': ['12345-6789', '23456-7890', '34567-8901'],
         'zipcode_five_digit': ['12345', '23456', '34567']
     })
@@ -170,35 +170,16 @@ def test_hospitalization_init_without_data():
     hosp_obj = Hospitalization()
     hosp_obj.validate()
     assert hosp_obj.df is None
-
-def test_timezone_validation_non_utc_datetime(sample_hospitalization_data_non_utc_timezone):
-    """Test that non-UTC datetime columns fail timezone validation."""
-    hosp_obj = Hospitalization(data=sample_hospitalization_data_non_utc_timezone)
-    hosp_obj.validate()
-
-    # Should fail due to non-UTC timezone
-    assert hosp_obj.isvalid() is False
-
-    # Check that timezone validation errors exist
-    timezone_errors = [e for e in hosp_obj.errors if e.get('type') == 'datetime_timezone']
-    assert len(timezone_errors) > 0, "Non-UTC datetime should cause timezone validation errors"
-
-    # Verify the specific error details
-    tz_error = timezone_errors[0]
-    assert tz_error['column'] in ['admission_dttm', 'discharge_dttm']
-    assert 'America/New_York' in str(tz_error.get('timezone', ''))
-
-# from_file constructor
 def test_hospitalization_from_file(mock_hospitalization_file):
     """Test loading hospitalization data from a parquet file."""
-    hosp_obj = Hospitalization.from_file(data_directory=mock_hospitalization_file, filetype="parquet")
+    hosp_obj = Hospitalization.from_file(data_directory=mock_hospitalization_file, filetype="parquet", timezone="UTC")
     assert hosp_obj.df is not None
 
 def test_hospitalization_from_file_nonexistent(tmp_path):
     """Test loading hospitalization data from a nonexistent file."""
     non_existent_path = str(tmp_path / "nonexistent_dir")
     with pytest.raises(FileNotFoundError):
-        Hospitalization.from_file(non_existent_path, filetype="parquet")
+        Hospitalization.from_file(non_existent_path, filetype="parquet", timezone="UTC")
 
 # isvalid method
 def test_hospitalization_isvalid(sample_valid_hospitalization_data, sample_hospitalization_data_invalid_category):

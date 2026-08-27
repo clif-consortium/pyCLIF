@@ -385,6 +385,26 @@ class TestCheckDatetimeFormat:
 # 9. check_lab_reference_units  (Polars + DuckDB)
 # ---------------------------------------------------------------------------
 
+@pytest.fixture
+def clifpy_caplog(caplog):
+    """caplog that still sees clifpy records after setup_logging() has run.
+
+    Constructing any table calls setup_logging(), which sets
+    logging.getLogger('clifpy').propagate = False. caplog's handler sits on the
+    root logger, so once an earlier test in the session has built a table these
+    records stop arriving. Attach directly to the clifpy logger instead.
+    """
+    clifpy_logger = logging.getLogger('clifpy')
+    previous = clifpy_logger.propagate
+    clifpy_logger.addHandler(caplog.handler)
+    clifpy_logger.propagate = True
+    try:
+        yield caplog
+    finally:
+        clifpy_logger.removeHandler(caplog.handler)
+        clifpy_logger.propagate = previous
+
+
 class TestCheckLabReferenceUnits:
 
     def test_valid_units_polars(self, labs_schema):
@@ -474,7 +494,7 @@ class TestCheckLabReferenceUnits:
         result = check_lab_reference_units_polars(lf, labs_schema_canonical, "labs")
         assert result.metrics["invalid_unit_categories"] == 0, result.warnings
 
-    def test_canonical_variant_logs_and_details_polars(self, labs_schema_canonical, caplog):
+    def test_canonical_variant_logs_and_details_polars(self, labs_schema_canonical, clifpy_caplog):
         """Schema-summary INFO log + per-category details capture variant-lookup state."""
         lf = pl.LazyFrame({
             "hospitalization_id": ["h1", "h2", "h3", "h4"],
@@ -482,11 +502,11 @@ class TestCheckLabReferenceUnits:
             "reference_unit": ["g/dL", "g per dL", "mg.dl", "mg/L"],  # 1 canonical, 2 via variant, 1 bad
             "lab_value": ["3.5", "3.6", "1.1", "99"],
         })
-        with caplog.at_level(logging.INFO, logger="clifpy.utils.validator"):
+        with clifpy_caplog.at_level(logging.INFO, logger="clifpy.utils.validator"):
             result = check_lab_reference_units_polars(lf, labs_schema_canonical, "labs")
 
         # Summary INFO line fires and mentions the variants map.
-        summary_msgs = [r.getMessage() for r in caplog.records if "allowed_unit_variants present" in r.getMessage()]
+        summary_msgs = [r.getMessage() for r in clifpy_caplog.records if "allowed_unit_variants present" in r.getMessage()]
         assert summary_msgs, "expected INFO summary about allowed_unit_variants"
 
         # albumin entry: mixed canonical + variant + invalid.
@@ -503,7 +523,7 @@ class TestCheckLabReferenceUnits:
         assert albumin_details['matched_via_variant_records'] == 1
         assert albumin_details['invalid_records'] == 1
 
-    def test_summary_log_when_no_variants_map(self, labs_schema, caplog):
+    def test_summary_log_when_no_variants_map(self, labs_schema, clifpy_caplog):
         """INFO log indicates when the schema has no allowed_unit_variants map."""
         lf = pl.LazyFrame({
             "hospitalization_id": ["h1"],
@@ -511,9 +531,9 @@ class TestCheckLabReferenceUnits:
             "reference_unit": ["g/dL"],
             "lab_value": ["3.5"],
         })
-        with caplog.at_level(logging.INFO, logger="clifpy.utils.validator"):
+        with clifpy_caplog.at_level(logging.INFO, logger="clifpy.utils.validator"):
             check_lab_reference_units_polars(lf, labs_schema, "labs")
-        summary_msgs = [r.getMessage() for r in caplog.records if "allowed_unit_variants NOT present" in r.getMessage()]
+        summary_msgs = [r.getMessage() for r in clifpy_caplog.records if "allowed_unit_variants NOT present" in r.getMessage()]
         assert summary_msgs, "expected INFO summary noting absence of variants map"
 
     def test_canonical_fallback_without_variants_map_polars(self):

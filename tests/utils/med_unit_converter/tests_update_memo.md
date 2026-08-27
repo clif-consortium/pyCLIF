@@ -190,6 +190,11 @@ These cover code paths I'm not modifying:
 
 I'll run only these (and ad-hoc smoke tests against my new code) to verify my work-in-progress without touching the under-update fixtures.
 
+<!-- invisible-code-block: python
+import pandas as pd
+from pathlib import Path
+-->
+
 ## 6. Tests that need updating in `test_unit_converter.py`
 
 ### 6a. Path fix (mandatory — fixtures moved)

@@ -245,8 +245,8 @@ def sample_valid_microbiology_nonculture_data():
         'micro_order_name': ['Blood Culture PCR', 'CSF PCR', 'Urine Culture', 'Respiratory PCR'],
         'fluid_category': ['blood_buffy', 'meninges_csf', 'genito_urinary_tract', 'respiratory_tract_lower'],
         'method_category': ['pcr', 'pcr', None, 'pcr'],
-        'organism_category': ['escherichia_coli', 'neisseria_sp', 'enterococcus_faecalis', 'pseudomonas_aeruginosa'],
-        'organism_group': ['bacteria', 'bacteria', 'bacteria', 'bacteria'],
+        'organism_category': ['influenza_a', 'sars_cov2', 'respiratory_syncytial_virus', 'mycoplasma_pneumoniae'],
+        'organism_group': ['influenza', 'viral_other', 'respiratory_syncytial_virus', 'mycoplasma'],
         'result_category': ['detected', 'not_detected', 'detected', 'not_detected'],
         'method_name': ['PCR Analysis', 'PCR Analysis', 'Standard Culture', 'PCR Analysis'],
         'result_name': ['E. coli Detected', 'No Neisseria Detected', 'Enterococcus Present', 'No Pseudomonas'],
@@ -293,8 +293,8 @@ def sample_microbiology_nonculture_data_for_stats():
         'fluid_name': ['Blood', 'CSF', 'Urine', 'Blood', 'Sputum', 'Wound'],
         'micro_order_name': ['Blood PCR', 'CSF PCR', 'Urine Culture', 'Blood Culture', 'Resp PCR', 'Wound Culture'],
         'fluid_category': ['blood_buffy', 'meninges_csf', 'genito_urinary_tract', 'blood_buffy', 'respiratory_tract_lower', 'woundsite'],
-        'organism_category': ['escherichia_coli', 'neisseria_sp', 'enterococcus_faecalis', 'candida_albicans', 'pseudomonas_aeruginosa', 'staphylococcus_aureus'],
-        'organism_group': ['bacteria', 'bacteria', 'bacteria', 'fungus', 'bacteria', 'bacteria'],
+        'organism_category': ['influenza_a', 'influenza_b', 'sars_cov2', 'adenovirus', 'respiratory_syncytial_virus', 'mycoplasma_pneumoniae'],
+        'organism_group': ['influenza', 'influenza', 'viral_other', 'adenovirus', 'respiratory_syncytial_virus', 'mycoplasma'],
         'result_category': ['detected', 'not_detected', 'detected', 'detected', 'not_detected', 'detected']
     })
 
@@ -347,7 +347,7 @@ def test_init_without_data():
 @pytest.mark.usefixtures("patch_microbiology_nonculture_schema_path", "patch_validator_load_schema")
 def test_from_file(mock_microbiology_nonculture_file, sample_valid_microbiology_nonculture_data):
     """Test loading data from file."""
-    mnc_obj = MicrobiologyNonculture.from_file(mock_microbiology_nonculture_file, filetype="parquet")
+    mnc_obj = MicrobiologyNonculture.from_file(mock_microbiology_nonculture_file, filetype="parquet", timezone="UTC")
     assert mnc_obj.df is not None
     pd.testing.assert_frame_equal(
         mnc_obj.df.reset_index(drop=True),
@@ -359,7 +359,7 @@ def test_from_file_nonexistent(tmp_path):
     """Test loading from nonexistent file path."""
     non_existent_path = str(tmp_path / "nonexistent_dir")
     with pytest.raises(FileNotFoundError):
-        MicrobiologyNonculture.from_file(non_existent_path, filetype="parquet")
+        MicrobiologyNonculture.from_file(non_existent_path, filetype="parquet", timezone="UTC")
 
 # isvalid method
 @pytest.mark.usefixtures("patch_microbiology_nonculture_schema_path", "patch_validator_load_schema")
@@ -382,7 +382,7 @@ def test_validate_output(sample_valid_microbiology_nonculture_data, sample_inval
     valid_mnc = MicrobiologyNonculture(data=sample_valid_microbiology_nonculture_data)
     valid_mnc.validate()
     captured = capsys.readouterr()
-    assert "Validation completed with" in captured.out
+    assert "Validation completed successfully" in captured.out
 
     invalid_mnc = MicrobiologyNonculture(data=sample_invalid_microbiology_nonculture_data_schema)
     invalid_mnc.validate()
@@ -473,8 +473,14 @@ def test_standardize_test_results_with_invalid_data(caplog):
     })
     mnc_obj = MicrobiologyNonculture()
 
-    with caplog.at_level('WARNING'):
-        result_df = mnc_obj.standardize_test_results(invalid_data)
+    # clifpy's logger sets propagate=False, so caplog's root handler never sees
+    # these records unless it is attached to the table logger directly.
+    mnc_obj.logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level('WARNING', logger=mnc_obj.logger.name):
+            result_df = mnc_obj.standardize_test_results(invalid_data)
+    finally:
+        mnc_obj.logger.removeHandler(caplog.handler)
 
     assert "Organism validation issues found" in caplog.text
     assert "Result validation issues found" in caplog.text
@@ -529,10 +535,12 @@ def test_acceptable_organism_categories_property():
     acceptable_categories = mnc_obj._acceptable_organism_categories
     assert isinstance(acceptable_categories, set)
     assert len(acceptable_categories) > 0
-    # Check some expected organisms are in the set
-    assert 'escherichia_coli' in acceptable_categories
-    assert 'staphylococcus_aureus' in acceptable_categories
-    assert 'candida_albicans' in acceptable_categories
+    # Check some expected organisms are in the set. This is the non-culture
+    # (PCR / respiratory panel) vocabulary -- culture organisms such as
+    # escherichia_coli belong to microbiology_culture, not here.
+    assert 'influenza_a' in acceptable_categories
+    assert 'sars_cov2' in acceptable_categories
+    assert 'respiratory_syncytial_virus' in acceptable_categories
 
 @pytest.mark.usefixtures("patch_microbiology_nonculture_schema_path")
 def test_acceptable_result_categories_property():
@@ -544,7 +552,7 @@ def test_acceptable_result_categories_property():
     # Check expected result categories
     assert 'detected' in acceptable_results
     assert 'not_detected' in acceptable_results
-    assert 'indeterminant' in acceptable_results
+    assert 'indeterminate' in acceptable_results
 
 @pytest.mark.usefixtures("patch_microbiology_nonculture_schema_path")
 def test_acceptable_fluid_categories_property():
@@ -583,7 +591,7 @@ def test_mixed_valid_invalid_organisms():
     """Test data with mix of valid and invalid organisms."""
     mixed_data = pd.DataFrame({
         'patient_id': ['P001', 'P002', 'P003'],
-        'organism_category': ['escherichia_coli', 'invalid_organism', 'staphylococcus_aureus'],
+        'organism_category': ['influenza_a', 'invalid_organism', 'sars_cov2'],
         'result_category': ['detected', 'detected', 'not_detected']
     })
     mnc_obj = MicrobiologyNonculture()
@@ -1162,7 +1170,7 @@ class TestRealDataIntegration:
         print(f"Using real data file: {real_data_path}")
 
         # Load the data - note the parent directory is passed to from_file
-        mnc = MicrobiologyNonculture.from_file(str(real_data_path.parent), filetype="parquet")
+        mnc = MicrobiologyNonculture.from_file(str(real_data_path.parent), filetype="parquet", timezone="UTC")
         mnc.validate()
 
         assert mnc.df is not None
@@ -1197,7 +1205,7 @@ class TestRealDataIntegration:
             data_path = os.environ.get('REAL_MICROBIOLOGY_DATA')
 
         if data_path and Path(data_path).exists():
-            mnc = MicrobiologyNonculture.from_file(str(Path(data_path).parent), filetype="parquet")
+            mnc = MicrobiologyNonculture.from_file(str(Path(data_path).parent), filetype="parquet", timezone="UTC")
             mnc.validate()
 
             assert mnc.df is not None

@@ -106,9 +106,18 @@ labs_b = Labs.from_file('/hospital_b/data', 'parquet', timezone='US/Pacific')
 **Solution**: Convert to common timezone
 
 ```python
-# Convert both to UTC for analysis
-labs_a.df['lab_datetime'] = labs_a.df['lab_datetime'].dt.tz_convert('UTC')
-labs_b.df['lab_datetime'] = labs_b.df['lab_datetime'].dt.tz_convert('UTC')
+# Convert both to UTC for analysis.
+#
+# Assign back through `.df`. Editing the frame `.df` hands you changes only that
+# pandas copy -- the table's stored data (`.data`) is untouched, so `validate()`
+# and the summary methods would still see the original timestamps.
+a = labs_a.df
+a['lab_datetime'] = a['lab_datetime'].dt.tz_convert('UTC')
+labs_a.df = a
+
+b = labs_b.df
+b['lab_datetime'] = b['lab_datetime'].dt.tz_convert('UTC')
+labs_b.df = b
 
 # Combine datasets
 combined_labs = pd.concat([labs_a.df, labs_b.df])
@@ -235,10 +244,12 @@ all_data = []
 for site in sites:
     table = Labs.from_file(f'/data/{site}', 'parquet', 
                           timezone=site_timezones[site])
-    # Convert to UTC
-    table.df['lab_datetime'] = table.df['lab_datetime'].dt.tz_convert('UTC')
-    table.df['site'] = site
-    all_data.append(table.df)
+    # Convert to UTC. Bind the pandas view once and edit that -- these rows are
+    # going into `all_data`, so there is no need to write them back to `table`.
+    df = table.df
+    df['lab_datetime'] = df['lab_datetime'].dt.tz_convert('UTC')
+    df['site'] = site
+    all_data.append(df)
 
 combined = pd.concat(all_data)
 ```
@@ -249,8 +260,10 @@ combined = pd.concat(all_data)
 for site in sites:
     table = Labs.from_file(f'/data/{site}', 'parquet',
                           timezone=site_timezones[site])
-    table.df['site'] = site
-    table.df['source_timezone'] = site_timezones[site]
+    df = table.df
+    df['site'] = site
+    df['source_timezone'] = site_timezones[site]
+    table.df = df   # assign back, or the columns live only on the discarded copy
 ```
 
 ## Timezone Reference

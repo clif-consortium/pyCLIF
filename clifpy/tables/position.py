@@ -1,5 +1,6 @@
 from typing import Optional
 import pandas as pd
+import polars as pl
 from .base_table import BaseTable
 
 
@@ -57,19 +58,27 @@ class Position(BaseTable):
         Return summary statistics for each position category, including missingness and unique patient counts.
         Expects columns: 'position_category', 'position_name', and optionally 'hospitalization_id'.
         """
-        if self.df is None or 'position_category' not in self.df.columns or 'hospitalization_id' not in self.df.columns:
+        if self.data is None or 'position_category' not in self.data.columns or 'hospitalization_id' not in self.data.columns:
             return {"status": "Missing columns"}
 
-        agg_dict = {
-            'count': ('position_category', 'count'),
-            'unique': ('hospitalization_id', 'nunique'),
-        }
-
+        # Computed on the stored polars frame; only the per-category result --
+        # one row per category -- is converted, so the full table is never
+        # copied into pandas.
+        #
+        # drop_nulls on the group key matches pandas' groupby(dropna=True), and
+        # drop_nulls before n_unique matches pandas' nunique(), which does not
+        # count NaN. polars does neither by default.
         stats = (
-            self.df
-            .groupby('position_category')
-            .agg(**agg_dict)
-            .round(2)
+            self.data
+            .drop_nulls(subset=['position_category'])
+            .group_by('position_category')
+            .agg(
+                pl.col('position_category').count().alias('count'),
+                pl.col('hospitalization_id').drop_nulls().n_unique().alias('unique'),
+            )
+            .sort('position_category')
+            .to_pandas()
+            .set_index('position_category')
         )
 
         return stats

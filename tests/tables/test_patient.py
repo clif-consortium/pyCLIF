@@ -11,16 +11,16 @@ def sample_valid_patient_data():
     """Create a valid patient DataFrame for testing."""
     return pd.DataFrame({
         'patient_id': ['P001', 'P002', 'P003'],
-        'birth_date': pd.to_datetime(['1980-01-01', '1990-02-02', '2000-03-03']),
+        'birth_date': pd.to_datetime(['1980-01-01', '1990-02-02', '2000-03-03']).date,
         'death_dttm': pd.to_datetime(['2024-12-01 08:15:00+00:00', '2024-12-01 08:15:00+00:00', '2024-12-01 08:15:00+00:00']),
         'race_name': ['white', 'black or african american', 'asian'],
-        'race_category': ['White', 'Black or African American', 'Asian'],
+        'race_category': ['white', 'black_or_african_american', 'asian'],
         'ethnicity_name': ['hispanic', 'non-hispanic', 'non-hispanic'],
-        'ethnicity_category': ['Non-Hispanic', 'Hispanic', 'Non-Hispanic'],
+        'ethnicity_category': ['non_hispanic', 'hispanic', 'non_hispanic'],
         'sex_name': ['male', 'female', 'male'],
-        'sex_category': ['Male', 'Female', 'Male'],
+        'sex_category': ['male', 'female', 'male'],
         'language_name': ['english', 'spanish', 'english'],
-        'language_category': ['English', 'Spanish', 'English']
+        'language_category': ['english', 'spanish', 'english']
     })
 
 @pytest.fixture
@@ -28,7 +28,7 @@ def sample_patient_data_invalid_category():
     """Create a patient DataFrame with invalid categorical values."""
     return pd.DataFrame({
         'patient_id': ['P001'],
-        'birth_date': pd.to_datetime(['1980-01-01']),
+        'birth_date': pd.to_datetime(['1980-01-01']).date,
         'death_dttm': pd.to_datetime(['2024-12-01 08:15:00+00:00']),
         'race_name': ['white'],
         'ethnicity_name': ['hispanic'],
@@ -45,7 +45,7 @@ def sample_patient_data_missing_cols():
     """Create a patient DataFrame with missing required columns."""
     return pd.DataFrame({
         'patient_id': ['P001'],
-        'birth_date': pd.to_datetime(['1980-01-01']),
+        'birth_date': pd.to_datetime(['1980-01-01']).date,
         'death_dttm': pd.to_datetime(['2024-12-01 08:15:00+00:00']),
         'race_name': ['white'],
         'ethnicity_name': ['hispanic'],
@@ -59,7 +59,7 @@ def sample_patient_data_non_utc_timezone():
     """Create a patient DataFrame with invalid categorical values."""
     return pd.DataFrame({
         'patient_id': ['P001'],
-        'birth_date': pd.to_datetime(['1980-01-01']),
+        'birth_date': pd.to_datetime(['1980-01-01']).date,
         'death_dttm': pd.to_datetime(['2024-12-01 08:15:00 EST']),
         'race_name': ['white'],
         'ethnicity_name': ['hispanic'],
@@ -134,14 +134,14 @@ def test_timezone_validation_non_utc_datetime(sample_patient_data_non_utc_timezo
 # from_file constructor
 def test_patient_from_file(mock_patient_file):
     """Test loading patient data from a parquet file."""
-    patient_obj = Patient.from_file(data_directory=mock_patient_file, filetype="parquet")
+    patient_obj = Patient.from_file(data_directory=mock_patient_file, filetype="parquet", timezone="UTC")
     assert patient_obj.df is not None
 
 def test_patient_from_file_nonexistent(tmp_path):
     """Test loading patient data from a nonexistent file."""
     non_existent_path = str(tmp_path / "nonexistent_dir")
     with pytest.raises(FileNotFoundError):
-        Patient.from_file(non_existent_path, filetype="parquet")
+        Patient.from_file(non_existent_path, filetype="parquet", timezone="UTC")
 
 # isvalid method
 def test_patient_isvalid(sample_valid_patient_data, sample_patient_data_invalid_category):

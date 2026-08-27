@@ -19,8 +19,7 @@ COMPLETENESS CHECKS:
 
 DESIGN PRINCIPLES:
 - Checks run on Polars (memory-efficient, lazy evaluation). Polars is a hard
-  dependency of clifpy -- ``clifpy.utils.io`` imports it unconditionally -- so there
-  is nothing to detect, no backend selection, and no fallback.
+  dependency of clifpy -- ``clifpy.utils.io`` imports it unconditionally.
 - pandas input is still accepted and converted on the way in, so callers holding a
   ``pd.DataFrame`` (e.g. ``BaseTable.df``) need not change.
 - Uses garbage collection and cache clearing for memory management
@@ -86,22 +85,27 @@ def _normalize_columns_polars(lf: 'pl.LazyFrame') -> 'pl.LazyFrame':
     ``__orig_<col>`` columns holding original values for every string column.
     The main string column is lowercased+stripped. Safe for lazy evaluation.
     """
+    #STEP-1: lower casing columns
     schema = lf.collect_schema()
+
     rename_map = {c: c.lower() for c in schema.names() if c != c.lower()}
     if rename_map:
         lf = lf.rename(rename_map)
-        schema = lf.collect_schema()
+        schema = pl.Schema({rename_map.get(n, n): dt for n, dt in schema.items()})
 
-    exprs = []
-    for name, dtype in schema.items():
-        if name.startswith(_ORIG_PREFIX):
-            continue
-        if dtype == pl.Utf8 or dtype == pl.String:
-            exprs.append(pl.col(name).alias(f"{_ORIG_PREFIX}{name}"))
-            exprs.append(pl.col(name).str.to_lowercase().str.strip_chars().alias(name))
-    if exprs:
-        lf = lf.with_columns(exprs)
-    return lf
+    #STEP-2: lowercase and strip chars for string cols
+    str_cols = [
+        name for name, dtype in schema.items()
+        if dtype == pl.String and not name.startswith(_ORIG_PREFIX)
+    ]
+    if not str_cols:
+        return lf
+
+    return lf.with_columns(
+        pl.col(str_cols).name.prefix(_ORIG_PREFIX),
+        pl.col(str_cols).str.strip_chars().str.to_lowercase(),
+    )
+
 
 
 def _table_frame(obj) -> Union[pd.DataFrame, 'pl.DataFrame', 'pl.LazyFrame']:

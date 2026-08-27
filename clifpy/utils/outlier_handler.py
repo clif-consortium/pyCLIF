@@ -580,7 +580,7 @@ def get_outlier_summary(table_obj, outlier_config_path: Optional[str] = None) ->
     """
     Get a summary of potential outliers without modifying the data.
 
-    This is a convenience wrapper around validate_numeric_ranges_from_config()
+    This reuses the same range expressions as apply_outlier_handling()
     for interactive use with table objects. It provides actual outlier counts
     and percentages without modifying the data.
 
@@ -602,7 +602,7 @@ def get_outlier_summary(table_obj, outlier_config_path: Optional[str] = None) ->
 
     See Also
     --------
-    clifpy.utils.validator.validate_numeric_ranges_from_config : Core validation function
+    apply_outlier_handling : Applies the same ranges, nulling the outliers
 
     Examples
     --------
@@ -621,31 +621,65 @@ def get_outlier_summary(table_obj, outlier_config_path: Optional[str] = None) ->
     if not config:
         return {"status": "Failed to load configuration"}
 
-    # Check if table has schema
-    if not hasattr(table_obj, 'schema') or table_obj.schema is None:
-        return {"status": "Table schema not available"}
-
-    # Check if table has outlier configuration
+    # Check if table has outlier configuration. The config keys off table_name,
+    # not the CLIF schema, so a schema is not required to report ranges.
     table_config = config.get('tables', {}).get(table_obj.table_name, {})
     if not table_config:
-        return {"status": f"No outlier configuration for table: {table_obj.table_name}"}
+        return {"status": f"No configuration for table: {table_obj.table_name}"}
 
-    # Use the validator to get actual outlier analysis
-    from clifpy.utils import validator
+    existing_columns = {
+        col: conf for col, conf in table_config.items()
+        if col in table_obj.df.columns
+    }
+    if not existing_columns:
+        return {
+            "status": (
+                "No configured columns present in data for table: "
+                f"{table_obj.table_name}"
+            )
+        }
 
-    outlier_results = validator.validate_numeric_ranges_from_config(
-        table_obj.df,
-        table_obj.table_name,
-        table_obj.schema,
-        config
-    )
-
-    # Build summary
-    summary = {
+    return {
         "table_name": table_obj.table_name,
         "total_rows": len(table_obj.df),
         "config_source": "CLIF standard" if outlier_config_path is None else "Custom",
-        "outliers": outlier_results
+        "columns_analyzed": sorted(existing_columns),
+        "outliers": _count_outliers(table_obj, existing_columns),
     }
 
-    return summary
+
+def _count_outliers(table_obj, column_configs: Dict[str, Any]) -> Dict[str, Any]:
+    """Count out-of-range values per column without modifying the data.
+
+    Reuses the same expressions ``apply_outlier_handling`` uses to null
+    outliers, so the summary can never disagree with what handling would do.
+    Applies them to a copy and counts the values that would be dropped.
+    """
+    df = table_obj.df
+    frame = df if isinstance(df, pl.DataFrame) else pl.from_pandas(df)
+
+    counts: Dict[str, Any] = {}
+    for column_name, column_config in column_configs.items():
+        expr = _build_column_expression(table_obj, column_name, column_config)
+        if expr is None:
+            continue
+        try:
+            before = frame.select(pl.col(column_name).is_not_null().sum()).item()
+            after = (
+                frame.with_columns(expr)
+                .select(pl.col(column_name).is_not_null().sum())
+                .item()
+            )
+        except Exception as e:
+            # A non-numeric column configured with a range is a data problem,
+            # not a reason to fail the whole summary.
+            counts[column_name] = {"status": f"Could not evaluate range: {e}"}
+            continue
+
+        counts[column_name] = {
+            "non_null_count": before,
+            "outlier_count": before - after,
+            "outlier_percent": round((before - after) / before * 100, 2) if before else 0.0,
+        }
+
+    return counts

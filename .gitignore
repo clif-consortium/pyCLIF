@@ -63,3 +63,6 @@ config/ucmc_config.yaml
 config/mimic_config.yaml
 clif_config.json".ipynb_checkpoints/" 
 .ipynb_checkpoints/
+
+# Local self-review / learning notes -- never committed
+dev-notes/

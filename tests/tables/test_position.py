@@ -83,7 +83,7 @@ def test_position_init_without_data():
 # from_file constructor
 def test_position_from_file(mock_position_file, sample_valid_position_data):
     """Test loading position data from a parquet file."""
-    pos_obj = Position.from_file(mock_position_file, filetype="parquet")
+    pos_obj = Position.from_file(mock_position_file, filetype="parquet", timezone="UTC")
     pos_obj.validate()
     assert pos_obj.df is not None
     pd.testing.assert_frame_equal(pos_obj.df.reset_index(drop=True), sample_valid_position_data.reset_index(drop=True), check_dtype=False)
@@ -93,7 +93,7 @@ def test_position_from_file_nonexistent(tmp_path):
     """Test loading position data from a nonexistent file."""
     non_existent_path = str(tmp_path / "nonexistent_dir")
     with pytest.raises(FileNotFoundError):
-        Position.from_file(non_existent_path, filetype="parquet")
+        Position.from_file(non_existent_path, filetype="parquet", timezone="UTC")
 
 # isvalid method
 def test_position_isvalid(sample_valid_position_data, sample_position_data_missing_cols):

@@ -1,7 +1,8 @@
-from typing import Optional, Dict, List, Union
+from typing import Optional, Dict, List, Union, Any
 import os
 import re
 import pandas as pd
+import polars as pl
 from .base_table import BaseTable
 
 # Pre-compiled regex patterns for unit normalization (compiled once at import)
@@ -95,6 +96,16 @@ class Labs(BaseTable):
                 str(k).lower().strip(): v for k, v in variants_map.items()
             }
 
+    @property
+    def lab_reference_units(self) -> Dict[str, Any]:
+        """Get the schema-declared reference units mapping.
+
+        This is the units the CLIF schema *expects* per ``lab_category``. It is
+        distinct from :meth:`get_lab_reference_units`, which reports the units
+        actually *observed* in the loaded data.
+        """
+        return self._lab_reference_units.copy() if self._lab_reference_units else {}
+
     def _resolve_target_units(self, entry) -> tuple:
         """Return ``(preferred_canonical, accepted_spellings)`` for one
         ``lab_reference_units`` entry.
@@ -118,26 +129,15 @@ class Labs(BaseTable):
 
     def _validate_required_columns(self, required: set) -> set:
         """Check for required columns, return set of missing columns."""
-        try:
-            import polars as pl
-            if isinstance(self.df, pl.LazyFrame):
-                columns = set(self.df.collect_schema().names())
-            else:
-                columns = set(self.df.columns)
-        except ImportError:
-            columns = set(self.df.columns)
-        return required - columns
+        return required - set(self.data.columns)
 
-    def _to_lazy_frame(self):
-        """Convert self.df to a Polars LazyFrame."""
-        import polars as pl
-        if isinstance(self.df, pd.DataFrame):
-            return pl.from_pandas(self.df).lazy()
-        elif isinstance(self.df, pl.LazyFrame):
-            return self.df
-        elif isinstance(self.df, pl.DataFrame):
-            return self.df.lazy()
-        raise TypeError(f"Unsupported dataframe type: {type(self.df)}")
+    def _to_lazy_frame(self) -> 'pl.LazyFrame':
+        """Return the stored frame as a Polars LazyFrame."""
+        # ``self.data`` is always a polars DataFrame (BaseTable converts on the way
+        # in), so this is a free .lazy() rather than the polars -> pandas -> polars
+        # round-trip that reading .df used to force. That round-trip also left a
+        # cached pandas copy of the whole table on the object as a side effect.
+        return self.data.lazy()
 
     def _get_lab_reference_units_polars(self) -> 'pl.DataFrame':
         """
@@ -151,7 +151,6 @@ class Labs(BaseTable):
         pl.DataFrame
             Aggregated counts by (lab_category, reference_unit).
         """
-        import polars as pl
 
         required = {'lab_category', 'reference_unit'}
         missing = self._validate_required_columns(required)
@@ -188,12 +187,15 @@ class Labs(BaseTable):
             self.logger.warning(f"Missing columns: {missing} - cannot compute reference units")
             return pd.DataFrame(columns=['lab_category', 'reference_unit', 'count'])
 
+        # One row per (category, unit) pair; only that aggregate becomes pandas.
+        # drop_nulls on the group keys matches pandas' groupby(dropna=True).
         return (
-            self.df
-            .groupby(['lab_category', 'reference_unit'], sort=False)
-            .size()
-            .reset_index(name='count')
-            .sort_values(['lab_category', 'reference_unit'])
+            self.data
+            .drop_nulls(subset=['lab_category', 'reference_unit'])
+            .group_by(['lab_category', 'reference_unit'])
+            .agg(pl.len().cast(pl.Int64).alias('count'))
+            .sort(['lab_category', 'reference_unit'])
+            .to_pandas()
         )
 
     def get_lab_reference_units(
@@ -220,7 +222,7 @@ class Labs(BaseTable):
         pd.DataFrame
             DataFrame with columns: ['lab_category', 'reference_unit', 'count']
         """
-        if self.df is None:
+        if self.data is None:
             raise ValueError("No data")
 
         # Try Polars first (more efficient for large data), fall back to pandas
@@ -230,12 +232,6 @@ class Labs(BaseTable):
             self.logger.debug("Used Polars for get_lab_reference_units")
         except Exception as e:
             self.logger.debug(f"Polars failed ({e}), falling back to pandas")
-            # Ensure we have a pandas DataFrame for the fallback
-            if not isinstance(self.df, pd.DataFrame):
-                try:
-                    self.df = self.df.to_pandas() if hasattr(self.df, 'to_pandas') else pd.DataFrame(self.df)
-                except Exception:
-                    return pd.DataFrame(columns=['lab_category', 'reference_unit', 'count'])
             result_df = self._get_lab_reference_units_pandas()
 
         if save:
@@ -381,7 +377,6 @@ class Labs(BaseTable):
         Uses join-based mapping for O(n) performance instead of O(n*k) chained conditions.
         Always returns a new DataFrame; caller handles inplace assignment.
         """
-        import polars as pl
 
         lf = self._to_lazy_frame()
 
@@ -425,7 +420,11 @@ class Labs(BaseTable):
         Uses merge-based mapping for O(n) performance instead of O(n*k) row-wise apply.
         Always returns a new DataFrame; caller handles inplace assignment.
         """
-        df = self.df.copy()
+        # This fallback is a pandas merge pipeline, so it stays pandas.
+        # Converting from .data explicitly gives the same frame without
+        # populating -- and then permanently holding -- the table's cached
+        # pandas view. to_pandas() already returns a fresh frame.
+        df = self.data.to_pandas()
 
         # Apply mappings using merge (O(n) vs O(n*k) for apply)
         if unit_mapping:
@@ -472,7 +471,7 @@ class Labs(BaseTable):
         Parameters
         ----------
         inplace : bool, default True
-            If True, modify self.df in place. If False, return a copy.
+            If True, modify the table's data in place. If False, return a copy.
         save : bool, default False
             If True, save a CSV of the unit mappings applied to the output directory.
         lowercase : bool, default False
@@ -486,7 +485,7 @@ class Labs(BaseTable):
         Optional[pd.DataFrame]
             If inplace=False, returns the modified DataFrame. Otherwise None.
         """
-        if self.df is None:
+        if self.data is None:
             raise ValueError(
                 "No data loaded. Please provide data using one of these methods:\n"
                 "  1. Labs.from_file(data_directory=..., filetype=..., timezone=...)\n"
@@ -502,29 +501,14 @@ class Labs(BaseTable):
             self.logger.warning("No lab reference units defined in schema")
             return None
 
-        # Get unique combinations (works for both pandas and polars)
-        try:
-            import polars as pl
-            if isinstance(self.df, (pl.DataFrame, pl.LazyFrame)):
-                if isinstance(self.df, pl.LazyFrame):
-                    unique_combos_df = (
-                        self.df
-                        .select(['lab_category', 'reference_unit'])
-                        .unique()
-                        .collect()
-                        .to_pandas()
-                    )
-                else:
-                    unique_combos_df = (
-                        self.df
-                        .select(['lab_category', 'reference_unit'])
-                        .unique()
-                        .to_pandas()
-                    )
-            else:
-                unique_combos_df = self.df[['lab_category', 'reference_unit']].drop_duplicates()
-        except ImportError:
-            unique_combos_df = self.df[['lab_category', 'reference_unit']].drop_duplicates()
+        # Only the distinct (lab_category, reference_unit) pairs cross into pandas
+        # for _build_unit_mapping -- a handful of rows, not the table.
+        unique_combos_df = (
+            self.data
+            .select(['lab_category', 'reference_unit'])
+            .unique()
+            .to_pandas()
+        )
 
         # Build mapping dictionary (shared logic)
         unit_mapping, mappings_applied, unmatched_units = self._build_unit_mapping(
@@ -537,24 +521,12 @@ class Labs(BaseTable):
             self.logger.debug("Used Polars for standardize_reference_units")
         except Exception as e:
             self.logger.debug(f"Polars failed ({e}), falling back to pandas")
-            # Ensure we have a pandas DataFrame for the fallback
-            if not isinstance(self.df, pd.DataFrame):
-                try:
-                    import polars as pl
-                    if isinstance(self.df, (pl.DataFrame, pl.LazyFrame)):
-                        if isinstance(self.df, pl.LazyFrame):
-                            self.df = self.df.collect().to_pandas()
-                        else:
-                            self.df = self.df.to_pandas()
-                    else:
-                        self.df = pd.DataFrame(self.df)
-                except Exception:
-                    raise ValueError("Could not convert data to pandas DataFrame")
             result_df = self._standardize_reference_units_pandas(unit_mapping, lowercase)
 
-        # Handle inplace at API level
+        # Handle inplace at API level. result_df is polars from the primary
+        # path and pandas from the fallback; the .data setter takes either.
         if inplace:
-            self.df = result_df
+            self.data = result_df
 
         # Log results
         if unit_mapping:
@@ -583,7 +555,6 @@ class Labs(BaseTable):
         if not inplace:
             # Convert to pandas if returning
             try:
-                import polars as pl
                 if isinstance(result_df, pl.DataFrame):
                     return result_df.to_pandas()
             except ImportError:
@@ -598,27 +569,33 @@ class Labs(BaseTable):
     def get_lab_category_stats(self) -> pd.DataFrame:
         """Return summary statistics for each lab category, including missingness and unique hospitalization_id counts."""
         if (
-            self.df is None
-            or 'lab_value_numeric' not in self.df.columns
-            or 'hospitalization_id' not in self.df.columns        # remove this line if hosp-id is optional
+            self.data is None
+            or 'lab_value_numeric' not in self.data.columns
+            or 'hospitalization_id' not in self.data.columns        # remove this line if hosp-id is optional
         ):
             return {"status": "Missing columns"}
         
+        # Aggregated in polars -- one row per category -- so the table itself
+        # is never converted. drop_nulls on the group key matches pandas'
+        # groupby(dropna=True); drop_nulls before n_unique matches nunique().
         stats = (
-            self.df
-            .groupby('lab_category')
+            self.data
+            .drop_nulls(subset=['lab_category'])            .group_by('lab_category')
             .agg(
-                count=('lab_value_numeric', 'count'),
-                unique=('hospitalization_id', 'nunique'),
-                missing_pct=('lab_value_numeric', lambda x: 100 * x.isna().mean()),
-                mean=('lab_value_numeric', 'mean'),
-                std=('lab_value_numeric', 'std'),
-                min=('lab_value_numeric', 'min'),
-                q1=('lab_value_numeric', lambda x: x.quantile(0.25)),
-                median=('lab_value_numeric', 'median'),
-                q3=('lab_value_numeric', lambda x: x.quantile(0.75)),
-                max=('lab_value_numeric', 'max'),
+                pl.col('lab_value_numeric').count().cast(pl.Int64).alias('count'),
+                pl.col('hospitalization_id').drop_nulls().n_unique().cast(pl.Int64).alias('unique'),
+                (100 * pl.col('lab_value_numeric').is_null().mean()).alias('missing_pct'),
+                pl.col('lab_value_numeric').mean().alias('mean'),
+                pl.col('lab_value_numeric').std().alias('std'),
+                pl.col('lab_value_numeric').min().alias('min'),
+                pl.col('lab_value_numeric').quantile(0.25, interpolation='linear').alias('q1'),
+                pl.col('lab_value_numeric').median().alias('median'),
+                pl.col('lab_value_numeric').quantile(0.75, interpolation='linear').alias('q3'),
+                pl.col('lab_value_numeric').max().alias('max'),
             )
+            .sort('lab_category')
+            .to_pandas()
+            .set_index('lab_category')
             .round(2)
         )
 
@@ -627,28 +604,31 @@ class Labs(BaseTable):
     def get_lab_specimen_stats(self) -> pd.DataFrame:
         """Return summary statistics for each lab category, including missingness and unique hospitalization_id counts."""
         if (
-            self.df is None
-            or 'lab_value_numeric' not in self.df.columns
-            or 'hospitalization_id' not in self.df.columns 
-            or 'lab_speciment_category' not in self.df.columns       # remove this line if hosp-id is optional
+            self.data is None
+            or 'lab_value_numeric' not in self.data.columns
+            or 'hospitalization_id' not in self.data.columns 
+            or 'lab_speciment_category' not in self.data.columns       # remove this line if hosp-id is optional
         ):
             return {"status": "Missing columns"}
         
         stats = (
-            self.df
-            .groupby('lab_specimen_category')
+            self.data
+            .drop_nulls(subset=['lab_specimen_category'])            .group_by('lab_specimen_category')
             .agg(
-                count=('lab_value_numeric', 'count'),
-                unique=('hospitalization_id', 'nunique'),
-                missing_pct=('lab_value_numeric', lambda x: 100 * x.isna().mean()),
-                mean=('lab_value_numeric', 'mean'),
-                std=('lab_value_numeric', 'std'),
-                min=('lab_value_numeric', 'min'),
-                q1=('lab_value_numeric', lambda x: x.quantile(0.25)),
-                median=('lab_value_numeric', 'median'),
-                q3=('lab_value_numeric', lambda x: x.quantile(0.75)),
-                max=('lab_value_numeric', 'max'),
+                pl.col('lab_value_numeric').count().cast(pl.Int64).alias('count'),
+                pl.col('hospitalization_id').drop_nulls().n_unique().cast(pl.Int64).alias('unique'),
+                (100 * pl.col('lab_value_numeric').is_null().mean()).alias('missing_pct'),
+                pl.col('lab_value_numeric').mean().alias('mean'),
+                pl.col('lab_value_numeric').std().alias('std'),
+                pl.col('lab_value_numeric').min().alias('min'),
+                pl.col('lab_value_numeric').quantile(0.25, interpolation='linear').alias('q1'),
+                pl.col('lab_value_numeric').median().alias('median'),
+                pl.col('lab_value_numeric').quantile(0.75, interpolation='linear').alias('q3'),
+                pl.col('lab_value_numeric').max().alias('max'),
             )
+            .sort('lab_specimen_category')
+            .to_pandas()
+            .set_index('lab_specimen_category')
             .round(2)
         )
 

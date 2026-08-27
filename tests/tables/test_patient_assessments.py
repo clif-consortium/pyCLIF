@@ -83,10 +83,12 @@ def sample_valid_assessments_data():
         'hospitalization_id': ['H001', 'H001', 'H002'],
         'recorded_dttm': pd.to_datetime(['2023-01-01 10:00', '2023-01-01 11:00', '2023-01-02 09:00']),
         'assessment_id': ['A001', 'A002', 'A003'],
-        'assessment_category': ['GCS', 'RASS', 'GCS'],
-        'assessment_group': ['Neurological', 'Sedation/Agitation', 'Neurological'],
+        'assessment_category': ['gcs_total', 'rass', 'gcs_total'],
+        'assessment_group': ['neurological', 'sedation_or_agitation', 'neurological'],
         'numerical_value': [14.0, -2.0, 15.0],
-        'string_value': ['E4V5M5', '-2', 'E4V5M6']
+        'string_value': ['E4V5M5', '-2', 'E4V5M6'],
+        'categorical_value': [None, None, None],
+        'text_value': ['E4V5M5', '-2', 'E4V5M6']
     })
 
 @pytest.fixture
@@ -115,23 +117,25 @@ def mock_assessments_file(tmp_path, sample_valid_assessments_data):
 @pytest.mark.usefixtures("patch_assessment_schema_path")
 def test_assessments_init_with_valid_data(sample_valid_assessments_data):
     """Test patient_assessments initialization with valid data."""
-    pa_obj = patient_assessments(sample_valid_assessments_data)
+    pa_obj = patient_assessments(data=sample_valid_assessments_data)
     assert pa_obj.df is not None
+    pa_obj.validate()
     assert pa_obj.isvalid() is True
     assert not pa_obj.errors
-    assert "GCS" in pa_obj.assessment_score_ranges # Check schema loaded
+    assert "gcs_total" in pa_obj.assessment_score_ranges # Check schema loaded
 
 @pytest.mark.usefixtures("patch_assessment_schema_path")
 def test_assessments_init_with_invalid_schema_data(sample_invalid_assessments_data_schema):
     """Test patient_assessments initialization with schema-invalid data."""
-    pa_obj = patient_assessments(sample_invalid_assessments_data_schema)
+    pa_obj = patient_assessments(data=sample_invalid_assessments_data_schema)
     assert pa_obj.df is not None
+    pa_obj.validate()
     assert pa_obj.isvalid() is False
     assert len(pa_obj.errors) > 0
     error_types = {e['type'] for e in pa_obj.errors}
-    # Per memory ffec3dfe-15d2-444a-97a8-a4b3af6273e3, validate_table doesn't report
-    # missing columns if other errors like datatype_mismatch are present.
-    assert 'Missing Required Columns' not in error_types
+    # The DQA pipeline reports missing required columns alongside other errors;
+    # it no longer suppresses them when a dtype mismatch is also present.
+    assert 'Missing Required Columns' in error_types
     assert 'Data Type Mismatch' in error_types
     assert 'Invalid Categorical Values' in error_types
 
@@ -140,51 +144,17 @@ def test_assessments_init_without_data():
     """Test patient_assessments initialization without data."""
     pa_obj = patient_assessments()
     assert pa_obj.df is None
-    assert pa_obj.isvalid() is True
+    # No data means validation never ran, so the table is not yet known to be valid.
+    assert pa_obj.isvalid() is False
     assert not pa_obj.errors
-    assert "GCS" in pa_obj.assessment_score_ranges
-
-def test_load_assessments_schema_file_not_found(monkeypatch, capsys):
-    """Test _load_assessments_schema when JSON file is not found."""
-    original_join = os.path.join
-    def mock_join_raise_fnf(*args):
-        if 'Patient_assessmentsModel.json' in args[-1]:
-            raise FileNotFoundError("Mocked File Not Found")
-        return original_join(*args)
-    monkeypatch.setattr(os.path, 'join', mock_join_raise_fnf)
-
-    pa_obj = patient_assessments()
-    assert pa_obj._assessment_score_ranges == {}
-    captured = capsys.readouterr()
-    assert "Warning: Patient_assessmentsModel.json not found" in captured.out
-
-def test_load_assessments_schema_json_decode_error(monkeypatch, tmp_path, capsys):
-    """Test _load_assessments_schema when JSON is malformed."""
-    mcide_dir = tmp_path / "mCIDE"
-    mcide_dir.mkdir()
-    malformed_schema_path = mcide_dir / "Patient_assessmentsModel.json"
-    with open(malformed_schema_path, 'w') as f:
-        f.write("this is not json")
-
-    original_join = os.path.join
-    monkeypatch.setattr(
-        os.path,
-        'join',
-        lambda *args: str(malformed_schema_path) if 'Patient_assessmentsModel.json' in args[-1] else original_join(*args),
-    )
-
-    pa_obj = patient_assessments()
-    assert pa_obj._assessment_score_ranges == {}
-    captured = capsys.readouterr()
-    assert "Warning: Invalid JSON in Patient_assessmentsModel.json" in captured.out
-
-# from_file constructor
+    assert "gcs_total" in pa_obj.assessment_score_ranges
 @pytest.mark.usefixtures("patch_assessment_schema_path")
 def test_assessments_from_file(mock_assessments_file, sample_valid_assessments_data):
     """Test loading data from a parquet file."""
-    pa_obj = patient_assessments.from_file(mock_assessments_file, table_format_type="parquet")
+    pa_obj = patient_assessments.from_file(mock_assessments_file, filetype="parquet", timezone="UTC")
     assert pa_obj.df is not None
     pd.testing.assert_frame_equal(pa_obj.df.reset_index(drop=True), sample_valid_assessments_data.reset_index(drop=True), check_dtype=False)
+    pa_obj.validate()
     assert pa_obj.isvalid() is True
 
 @pytest.mark.usefixtures("patch_assessment_schema_path")
@@ -192,30 +162,32 @@ def test_assessments_from_file_nonexistent(tmp_path):
     """Test loading from a nonexistent file."""
     non_existent_path = str(tmp_path / "nonexistent_dir")
     with pytest.raises(FileNotFoundError):
-        patient_assessments.from_file(non_existent_path, table_format_type="parquet")
+        patient_assessments.from_file(non_existent_path, filetype="parquet", timezone="UTC")
 
 # isvalid method
 @pytest.mark.usefixtures("patch_assessment_schema_path")
 def test_assessments_isvalid(sample_valid_assessments_data, sample_invalid_assessments_data_schema):
     """Test isvalid method."""
-    valid_pa = patient_assessments(sample_valid_assessments_data)
+    valid_pa = patient_assessments(data=sample_valid_assessments_data)
+    valid_pa.validate()
     assert valid_pa.isvalid() is True
-    
-    invalid_pa = patient_assessments(sample_invalid_assessments_data_schema)
+
+    invalid_pa = patient_assessments(data=sample_invalid_assessments_data_schema)
+    invalid_pa.validate()
     assert invalid_pa.isvalid() is False
 
 # validate method
 @pytest.mark.usefixtures("patch_assessment_schema_path")
 def test_assessments_validate_output(sample_valid_assessments_data, sample_invalid_assessments_data_schema, capsys):
     """Test validate method output messages."""
-    patient_assessments(sample_valid_assessments_data)
+    patient_assessments(data=sample_valid_assessments_data).validate()
     captured = capsys.readouterr()
     assert "Validation completed successfully." in captured.out
 
-    patient_assessments(sample_invalid_assessments_data_schema)
+    patient_assessments(data=sample_invalid_assessments_data_schema).validate()
     captured = capsys.readouterr()
     assert "Validation completed with" in captured.out
-    assert "schema validation error(s)" in captured.out
+    assert "error(s)" in captured.out
 
     pa_no_data = patient_assessments()
     pa_no_data.validate()
@@ -227,10 +199,10 @@ def test_assessments_validate_output(sample_valid_assessments_data, sample_inval
 @pytest.mark.usefixtures("patch_assessment_schema_path")
 def test_get_assessment_categories(sample_valid_assessments_data):
     """Test get_assessment_categories method."""
-    pa_obj = patient_assessments(sample_valid_assessments_data)
+    pa_obj = patient_assessments(data=sample_valid_assessments_data)
     categories = pa_obj.get_assessment_categories()
     assert isinstance(categories, list)
-    assert set(categories) == {'GCS', 'RASS'}
+    assert set(categories) == {'gcs_total', 'rass'}
 
     pa_empty = patient_assessments()
     assert pa_empty.get_assessment_categories() == []
@@ -238,29 +210,34 @@ def test_get_assessment_categories(sample_valid_assessments_data):
 @pytest.mark.usefixtures("patch_assessment_schema_path")
 def test_filter_by_assessment_category(sample_valid_assessments_data):
     """Test filter_by_assessment_category method."""
-    pa_obj = patient_assessments(sample_valid_assessments_data)
-    gcs_df = pa_obj.filter_by_assessment_category('GCS')
+    pa_obj = patient_assessments(data=sample_valid_assessments_data)
+    gcs_df = pa_obj.filter_by_assessment_category('gcs_total')
     assert len(gcs_df) == 2
-    assert all(gcs_df['assessment_category'] == 'GCS')
+    assert all(gcs_df['assessment_category'] == 'gcs_total')
 
     non_existent_df = pa_obj.filter_by_assessment_category('NonExistent')
     assert non_existent_df.empty
 
     pa_empty = patient_assessments()
-    assert pa_empty.filter_by_assessment_category('GCS').empty
+    assert pa_empty.filter_by_assessment_category('gcs_total').empty
 
 @pytest.mark.usefixtures("patch_assessment_schema_path")
 def test_get_summary_stats(sample_valid_assessments_data):
     """Test get_summary_stats method."""
-    pa_obj = patient_assessments(sample_valid_assessments_data)
+    pa_obj = patient_assessments(data=sample_valid_assessments_data)
     stats = pa_obj.get_summary_stats()
 
     assert stats['total_records'] == 3
     assert stats['unique_hospitalizations'] == 2
-    assert stats['assessment_category_counts'] == {'GCS': 2, 'RASS': 1}
+    assert stats['assessment_category_counts'] == {'gcs_total': 2, 'rass': 1}
     assert 'numerical_value_stats' in stats
-    assert 'GCS' in stats['numerical_value_stats']
-    assert stats['numerical_value_stats']['GCS']['mean'] == 14.5
+    assert 'gcs_total' in stats['numerical_value_stats']
+    assert stats['numerical_value_stats']['gcs_total']['mean'] == 14.5
 
     pa_empty = patient_assessments()
     assert pa_empty.get_summary_stats() == {}
+
+# Retired: test_load_*_schema covered a JSON `*Model.json` loader that no
+# longer exists. Schemas are versioned YAML loaded by BaseTable via
+# clifpy.schemas.load_schema; these tests monkeypatched os.path.join for a
+# file the package never opens.

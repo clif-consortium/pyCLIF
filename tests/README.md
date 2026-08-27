@@ -2,6 +2,12 @@
 
 This guide outlines some general testing principles for `clifpy` developers. The following draws upon the manually curated and proof-read tests (starting from [`test_acceptable_dose_unit_patterns`](../tests/tables/test_medication_admin_continuous.py#L417)) in [test_medication_admin_continuous.py](../tests/tables/test_medication_admin_continuous.py) as a reference implementation.
 
+<!-- invisible-code-block: python
+import pytest
+import pandas as pd
+from pathlib import Path
+-->
+
 ## Unit Tests
 In most cases, tests should be **unit tests**, meaning they should test only **one granular aspect** of a transformation -- and not lump them together -- for us to have a precise sense of the expected behavior of a function. To enable this, functions themselves need to be structured in a similarly granular fashion, exposing them for effective testing. 
 

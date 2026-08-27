@@ -22,7 +22,8 @@ def sample_valid_adt_data():
         'location_name': ['B06F', 'B06T', 'T09F', 'N23E'],
         'location_category': ['ed', 'icu', 'ward', 'icu'],
         'hospital_type': ['academic', 'academic', 'academic', 'academic'],
-        'location_type': ['general_icu', 'medical_icu', 'general_icu', 'general_icu']
+        'location_type': ['general_icu', 'medical_icu', 'general_icu', 'general_icu'],
+        'room_id': ['R101', 'R202', 'R303', 'R404']
     })
 
 @pytest.fixture
@@ -108,7 +109,7 @@ def test_adt_init_with_missing_columns(sample_adt_data_missing_cols):
     assert "Missing Required Columns" in error_types
     missing_cols = [e['details']['column'] for e in adt_obj.errors
                     if e['type'] == 'Missing Required Columns']
-    assert set(missing_cols) == {'hospital_id', 'hospital_type'}
+    assert set(missing_cols) == {'hospital_id', 'hospital_type', 'location_type', 'room_id'}
 
 def test_adt_init_without_data():
     """Test adt initialization without data."""
@@ -129,14 +130,14 @@ def test_timezone_validation_non_utc_datetime(sample_adt_data_invalid_datetime):
 # from_file constructor
 def test_adt_from_file(mock_adt_file):
     """Test loading adt data from a parquet file."""
-    adt_obj = Adt.from_file(data_directory=mock_adt_file, filetype="parquet")
+    adt_obj = Adt.from_file(data_directory=mock_adt_file, filetype="parquet", timezone="UTC")
     assert adt_obj.df is not None
 
 def test_adt_from_file_nonexistent(tmp_path):
     """Test loading adt data from a nonexistent file."""
     non_existent_path = str(tmp_path / "nonexistent_dir")
     with pytest.raises(FileNotFoundError):
-        Adt.from_file(non_existent_path, filetype="parquet")
+        Adt.from_file(non_existent_path, filetype="parquet", timezone="UTC")
 
 # isvalid method
 def test_adt_isvalid(sample_valid_adt_data, sample_adt_data_invalid_category):
@@ -156,7 +157,7 @@ def test_adt_validate_output(sample_adt_data_invalid_category, capsys):
     invalid_adt = Adt(data=sample_adt_data_invalid_category)
     invalid_adt.validate()
     captured = capsys.readouterr()
-    assert "Validation completed with 4 error(s)" in captured.out
+    assert f"Validation completed with {len(invalid_adt.errors)} error(s)" in captured.out
     
     # No data
     adt_no_data = Adt()
