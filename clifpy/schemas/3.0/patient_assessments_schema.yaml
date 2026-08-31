@@ -153,6 +153,7 @@ columns:
 
 required_columns:
   - hospitalization_id
+  - documenting_provider_id
   - recorded_dttm
   - assessment_category
   - numerical_value
