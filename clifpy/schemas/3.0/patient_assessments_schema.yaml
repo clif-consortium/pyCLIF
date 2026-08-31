@@ -9,7 +9,7 @@ columns:
     is_group_column: false
   - name: documenting_provider_id
     data_type: VARCHAR
-    required: false
+    required: true
     is_category_column: false
     is_group_column: false
   - name: recorded_dttm
