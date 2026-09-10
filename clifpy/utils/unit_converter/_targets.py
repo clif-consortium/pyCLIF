@@ -218,20 +218,27 @@ def load_dose_unit_targets(
         targets[cat] = unit
 
     if conflicts:
-        # WARNING: a category listed twice with different targets is a defect
-        # in the schema, and the difference is not always cosmetic -- CLIF 3.0
-        # lists epoprostenol as both ng/kg/min and mcg/kg/min, a factor of
-        # 1000, and terbutaline as both mg and mcg/kg/min, which are not even
-        # the same unit class. Silently taking one would standardise those
-        # categories to an arbitrary choice.
+        # NOTE: this is a clifpy limitation, not a schema defect. CLIF 3.0
+        # keys its targets on (med_category, med_group), and the same drug is
+        # legitimately dosed differently by route -- epoprostenol is ng/kg/min
+        # as an IV infusion and mcg/kg/min inhaled, a factor of 1000;
+        # terbutaline is mg inhaled and mcg/kg/min otherwise, not even the same
+        # unit class. clifpy currently keys on med_category alone, so it can
+        # only carry one target per category.
+        #
+        # Until composite-key support lands, keep the FIRST occurrence, so the
+        # result never depends on row order, and say plainly which rows were
+        # collapsed. See docs/user-guide/med-dose-unit-data-quality.md.
         detail = '; '.join(
             f"{cat}: {' vs '.join(units)} (using {targets[cat]})"
             for cat, units in sorted(conflicts.items())
         )
         logger.warning(
-            "Schema %s lists %d med_category value(s) more than once with "
-            "conflicting target units. Keeping the first occurrence of each. "
-            "Resolve upstream, or pass an explicit dict to override: %s",
+            "Schema %s defines more than one target unit for %d med_category "
+            "value(s), most likely distinguished by med_group (route). clifpy "
+            "keys on med_category alone and is keeping the first occurrence of "
+            "each. If the other applies to your cohort, pass an explicit dict "
+            "to override: %s",
             source, len(conflicts), detail,
         )
 

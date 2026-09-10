@@ -78,17 +78,27 @@ volume_targets = load_dose_unit_targets(
     SCHEMA, unit_col="volume_infusion_rate_units")
 ```
 
-!!! warning "CLIF 3.0 lists two categories twice, with conflicting targets"
-    `epoprostenol` appears as both `ng/kg/min` and `mcg/kg/min` (a factor of
-    1000), and `terbutaline` as both `mg` and `mcg/kg/min` (different unit
-    classes). `load_dose_unit_targets` keeps the **first** occurrence so the
-    result never depends on row order, and logs a warning naming each conflict.
-    Override deliberately if you need the other:
+!!! warning "Targets are keyed by `med_category` alone — a known limitation"
+    CLIF 3.0 keys its targets on `(med_category, med_group)`, because the same
+    drug is dosed differently by route. `epoprostenol` is `ng/kg/min` as an IV
+    infusion and `mcg/kg/min` inhaled — a factor of 1000 — and `terbutaline` is
+    `mg` inhaled and `mcg/kg/min` otherwise.
+
+    clifpy's `preferred_units` is a flat `{med_category: unit}` mapping, so it
+    can carry only one target per category. `load_dose_unit_targets` keeps the
+    **first** occurrence (never row-order dependent) and warns. Override for
+    your cohort's route:
 
     ```python
     targets = load_dose_unit_targets(SCHEMA)
-    targets["epoprostenol"] = "ng/kg/min"
+    targets["epoprostenol"] = "ng/kg/min"   # IV cohort
     ```
+
+    Only these two categories are affected in CLIF 3.0 continuous, and none in
+    intermittent. See
+    [Medication Dose Unit Data Quality](med-dose-unit-data-quality.md#known-limitation-targets-are-keyed-by-med_category-alone)
+    for the workaround when a cohort spans both routes, and for what supporting
+    composite keys would involve.
 
 ## Standardize dose units by medication
 

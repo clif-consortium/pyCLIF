@@ -250,9 +250,11 @@ def test_mcide_targets_all_acceptable():
     """
     spec = pd.read_csv(FIXTURE_DIR / 'mcide_target_units.csv')
     assert len(spec) == 25, 'fixture should list all 25 distinct mCIDE targets'
-    # row counts must still add up to the published schema sizes
-    assert spec.loc[spec.table == 'continuous', 'n_categories'].sum() == 77
-    assert spec.loc[spec.table == 'intermittent', 'n_categories'].sum() == 271
+    # Row counts, not distinct categories: CLIF 3.0 keys on
+    # (med_category, med_group), so epoprostenol and terbutaline each occupy
+    # two rows with different targets. 77 rows cover 75 distinct categories.
+    assert spec.loc[spec.table == 'continuous', 'n_rows'].sum() == 77
+    assert spec.loc[spec.table == 'intermittent', 'n_rows'].sum() == 271
 
     rejected = [u for u in spec['target_unit'] if _normalize(u) not in ALL_ACCEPTABLE_UNITS]
     assert not rejected, f'mCIDE targets not accepted: {rejected}'
@@ -435,24 +437,52 @@ def test_load_dose_unit_targets_drops_blank_and_na(tmp_path):
 
 
 @pytest.mark.unit_conversion
-def test_duplicate_schema_targets_keep_first_and_warn(tmp_path, captured_warnings):
-    """CLIF 3.0 lists epoprostenol twice, as ng/kg/min and mcg/kg/min.
+def test_multiple_targets_per_category_keep_first_and_warn(tmp_path, captured_warnings):
+    """CLIF 3.0 keys targets on (med_category, med_group), clifpy on category.
 
-    That is a factor of 1000, so the choice must be deterministic (first wins,
-    not row-order dependent) and must be surfaced rather than silently made.
+    epoprostenol is ng/kg/min as an IV infusion and mcg/kg/min inhaled -- a
+    factor of 1000 -- and terbutaline is mg inhaled and mcg/kg/min otherwise.
+    Both schema rows are correct; the flat `preferred_units` mapping is what
+    cannot hold them.
+
+    Until composite keys are supported, the collapse must be deterministic
+    (first wins, never row-order dependent) and must be announced, pointing at
+    med_group so the reader knows how to resolve it. See
+    docs/user-guide/med-dose-unit-data-quality.md.
     """
     p = tmp_path / 'targets.csv'
-    p.write_text('med_category,med_dose_unit\n'
-                 'epoprostenol,ng/kg/min\nepoprostenol,mcg/kg/min\n'
-                 'terbutaline,mg\nterbutaline,mcg/kg/min\n')
+    p.write_text(
+        'med_category,med_dose_unit,med_group\n'
+        'epoprostenol,ng/kg/min,pulmonary_vasodilators_iv\n'
+        'epoprostenol,mcg/kg/min,pulmonary_vasodilators_inhaled\n'
+        'terbutaline,mg,inhaled\n'
+        'terbutaline,mcg/kg/min,others\n'
+    )
     targets = load_dose_unit_targets(p)
 
     assert targets == {'epoprostenol': 'ng/kg/min', 'terbutaline': 'mg'}
     text = '\n'.join(captured_warnings)
-    assert 'conflicting target units' in text
-    # the warning must name both competing units, not just say "duplicate"
+    # the warning must name both candidate units and point at med_group,
+    # not merely report a duplicate
+    assert 'med_group' in text
     assert 'epoprostenol' in text and 'ng/kg/min' in text and 'mcg/kg/min' in text
     assert 'terbutaline' in text
+
+
+@pytest.mark.unit_conversion
+def test_overriding_a_route_specific_target(tmp_path):
+    """The documented workaround: override the category for your cohort's route."""
+    p = tmp_path / 'targets.csv'
+    p.write_text('med_category,med_dose_unit\n'
+                 'epoprostenol,ng/kg/min\nepoprostenol,mcg/kg/min\n')
+    targets = load_dose_unit_targets(p)
+    targets['epoprostenol'] = 'mcg/kg/min'          # inhaled cohort
+
+    out, _ = standardize_med_dose_units(
+        _frame([('epoprostenol', 1000.0, 'ng/kg/min')]), targets)
+    # 1000 ng/kg/min == 1 mcg/kg/min
+    assert out['med_dose_converted'].iloc[0] == pytest.approx(1.0)
+    assert out['med_dose_unit_converted'].iloc[0] == 'mcg/kg/min'
 
 
 @pytest.mark.unit_conversion

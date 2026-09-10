@@ -148,26 +148,71 @@ collapsing it to NULL would hide it.
 
 ---
 
-## A note on the schema itself
+## Known limitation: targets are keyed by `med_category` alone
 
-Two `med_category` values are listed **twice with conflicting target units** in
-the CLIF 3.0 mCIDE continuous file:
+**This is a clifpy limitation, not a data problem.** It is the most significant
+known gap in the current converter and is flagged here for the next iteration.
 
-| category | targets listed | apart by |
-|---|---|---|
-| `epoprostenol` | `ng/kg/min` and `mcg/kg/min` | factor of 1000 |
-| `terbutaline` | `mg` and `mcg/kg/min` | different unit *classes* |
+CLIF 3.0 keys its target units on **`(med_category, med_group)`**, not on
+`med_category` alone. The same drug is legitimately dosed differently depending
+on route, and `med_group` is what distinguishes them:
 
-`load_dose_unit_targets()` keeps the **first** occurrence, so results do not
-depend on row order, and logs a warning naming each category and its competing
-units. Pass an explicit dict to override:
+| med_category | med_group | target unit | apart by |
+|---|---|---|---|
+| `epoprostenol` | `pulmonary_vasodilators_iv` | `ng/kg/min` | factor of **1000** |
+| `epoprostenol` | `pulmonary_vasodilators_inhaled` | `mcg/kg/min` | |
+| `terbutaline` | `inhaled` | `mg` | different unit **classes** |
+| `terbutaline` | `others` | `mcg/kg/min` | |
+
+Inhaled epoprostenol and IV epoprostenol are different therapies with different
+dosing conventions; the schema is right to separate them.
+
+clifpy's `preferred_units` is a flat `{med_category: unit}` mapping, so it can
+carry only **one** target per category. `load_dose_unit_targets()` therefore
+keeps the **first** occurrence — deterministic, never row-order dependent — and
+logs a warning naming the category and both candidate units.
+
+### Working around it today
+
+If your cohort is dominated by one route, override the affected categories
+explicitly:
 
 ```python
 targets = load_dose_unit_targets(SCHEMA_URL)
-targets['epoprostenol'] = 'ng/kg/min'   # decide deliberately
+targets['epoprostenol'] = 'ng/kg/min'    # IV cohort
+targets['terbutaline'] = 'mg'            # inhaled cohort
+converted, counts = standardize_med_dose_units(mac_df, targets, vitals_df=vitals_df)
 ```
 
-This should be resolved upstream in the mCIDE files.
+If your cohort contains **both** routes for one of these drugs, split the frame
+on `med_group`, convert each part with its own target, and concatenate. Only two
+categories are affected in CLIF 3.0 continuous, and none in intermittent.
+
+Whichever you do, check `conversion_counts` for those categories afterwards.
+
+### What the next iteration needs
+
+Supporting this properly means letting the target key be a tuple rather than a
+scalar, which touches the whole preferred-unit path:
+
+1. **`load_dose_unit_targets`** — return `{(category, group): unit}` when a
+   `group_col` is supplied, and keep the flat shape otherwise so existing
+   callers are unaffected.
+2. **`convert_dose_units_by_med_category`** — join `preferred_units` on both
+   columns. The join in `_convert.py` is already a `LEFT JOIN ... USING
+   (med_category)`; it becomes `USING (med_category, med_group)` with a
+   coalesce so a category-only entry still matches every group.
+3. **Group resolution** — the med tables already expose
+   `med_category_to_group_mapping` from the schema, so `med_group` can be
+   derived when the column is absent from the data rather than requiring it.
+4. **`#153` validation** — the "requested category not present" check keys on
+   category; it would need to report the pair.
+5. **Precedence** — decide whether a `(category, group)` entry beats a bare
+   `category` entry. It should, but that needs stating and testing.
+
+The awkward part is that `med_group` is not required to be present in a
+medication table, so the feature has to degrade cleanly to today's behaviour
+when it is missing. That is why it was deferred rather than bolted on.
 
 ---
 

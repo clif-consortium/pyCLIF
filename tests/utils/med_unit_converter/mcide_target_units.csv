@@ -1,14 +1,14 @@
-table,target_unit,n_categories,note
-continuous,mcg/kg/min,19,"norepinephrine, propofol, milrinone, dobutamine, ..."
+table,target_unit,n_rows,note
+continuous,mcg/kg/min,19,"norepinephrine, propofol, milrinone, epoprostenol (inhaled), terbutaline (others), ..."
 continuous,mg/hr,13,"bumetanide, clevidipine, diltiazem, furosemide, ..."
 continuous,ml/hr,11,"albumin_5, dextrose_5_water, lactated_ringers_solution, ..."
 continuous,mcg/hr,5,"alprostadil, fentanyl, levothyroxine, liothyronine, octreotide"
 continuous,mg/min,5,"amiodarone, labetalol, lidocaine, phentolamine, procainamide"
 continuous,mg/kg/hr,4,"aminophylline, ketamine, pentobarbital, zidovudine"
 continuous,g/hr,3,"albumin_25, aminocaproic_acid, magnesium_sulfate"
-continuous,ng/kg/min,3,"angiotensin, epoprostenol, treprostinil"
+continuous,ng/kg/min,3,"angiotensin, epoprostenol (IV), treprostinil"
 continuous,mcg/kg/hr,3,"bivalirudin, dexmedetomidine, naloxone"
-continuous,mg,2,"albuterol, terbutaline"
+continuous,mg,2,"albuterol, terbutaline (inhaled)"
 continuous,ml,2,"baclofen, ipratropium"
 continuous,units/kg/hr,1,"heparin -- spelled out, not u/kg/hr"
 continuous,units/hr,1,"insulin -- spelled out, not u/hr"
