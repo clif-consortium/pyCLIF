@@ -89,6 +89,7 @@ nav:
         - Working with Timezones: user-guide/timezones.md
       - Advanced Features:
         - Medication Unit Conversion: user-guide/med-unit-conversion.md
+        - Medication Dose Unit Data Quality: user-guide/med-dose-unit-data-quality.md
         - SOFA Score Computation: user-guide/sofa.md
         - CDC Adult Sepsis Event (ASE): user-guide/ase.md
         - Respiratory Support Waterfall: user-guide/waterfall.md

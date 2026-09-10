@@ -8,17 +8,70 @@ The unit converter module provides comprehensive medication dose unit conversion
 
 ::: clifpy.utils.unit_converter.convert_dose_units_by_med_category
 
+::: clifpy.utils.unit_converter.standardize_med_dose_units
+
 ::: clifpy.utils.unit_converter.standardize_dose_to_base_units
+
+::: clifpy.utils.unit_converter.find_most_recent_weight
+
+### Schema Targets
+
+Per-`med_category` target units are read from an external CLIF mCIDE schema.
+Readers are registered per file extension, so a new format needs no change to
+the converter.
+
+::: clifpy.utils.unit_converter.load_dose_unit_targets
+
+::: clifpy.utils.unit_converter.register_target_reader
+
+::: clifpy.utils.unit_converter.available_target_formats
+
+### Column Names
+
+Input and output column names are parameters. Caller-supplied identifiers are
+validated and quoted before reaching SQL.
+
+::: clifpy.utils.unit_converter.validate_column_name
 
 ### Constants and Data Structures
 
+#### Unit Grammar
+
+`SUBCLASS_SPEC` is the single source of truth for the amount axis; the regexes
+and acceptable-unit sets below are all derived from it, so adding a unit family
+is a one-line change.
+
+::: clifpy.utils.unit_converter.SUBCLASS_SPEC
+
+::: clifpy.utils.unit_converter.SUBCLASS_REGEX
+
+::: clifpy.utils.unit_converter.STANDALONE_SUBCLASSES
+
+::: clifpy.utils.unit_converter.TOKEN_TO_BASE_FACTOR
+
+::: clifpy.utils.unit_converter.TIME_TO_BASE_FACTOR
+
+::: clifpy.utils.unit_converter.KG_PER_LB
+
 #### Acceptable Units
+
+::: clifpy.utils.unit_converter.ACCEPTABLE_BASE_AMOUNT_UNITS
+
+::: clifpy.utils.unit_converter.STANDALONE_AMOUNT_UNITS
 
 ::: clifpy.utils.unit_converter.ACCEPTABLE_AMOUNT_UNITS
 
 ::: clifpy.utils.unit_converter.ACCEPTABLE_RATE_UNITS
 
 ::: clifpy.utils.unit_converter.ALL_ACCEPTABLE_UNITS
+
+#### Classification and Output
+
+::: clifpy.utils.unit_converter.DEFAULT_COUNTABLE_UNITS
+
+::: clifpy.utils.unit_converter.MISSING_UNIT_PLACEHOLDERS
+
+::: clifpy.utils.unit_converter.CANONICAL_UNIT_SPELLING
 
 #### Unit Patterns
 

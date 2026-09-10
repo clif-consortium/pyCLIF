@@ -2,6 +2,94 @@
 
 CLIFpy provides robust medication dose unit conversion functionality to standardize medication dosing across different unit systems. This is essential for clinical data analysis where medications may be recorded in various units across different systems.
 
+There are two ways in: give the converter a dictionary of target units you
+choose yourself, or point it at a CLIF mCIDE schema file and let it read the
+targets from there.
+
+## Standardize against the mCIDE schema
+
+`med_category` target units are published in CLIF's mCIDE files. Point clifpy at
+one and the whole table is standardized in a single call:
+
+```python
+from clifpy import ClifOrchestrator
+
+SCHEMA = (
+    "https://raw.githubusercontent.com/Common-Longitudinal-ICU-data-Format/"
+    "CLIF/3.0/mCIDE/medication_admin_continuous/"
+    "clif_medication_admin_continuous_med_categories.csv"
+)
+
+co = ClifOrchestrator(data_directory=..., filetype="parquet", timezone="US/Eastern")
+co.standardize_dose_units_for_continuous_meds(SCHEMA)
+
+converted = co.medication_admin_continuous.df_converted
+counts = co.medication_admin_continuous.conversion_counts
+```
+
+Or without the orchestrator:
+
+```python
+from clifpy.utils.unit_converter import (
+    load_dose_unit_targets,
+    standardize_med_dose_units,
+)
+
+targets = load_dose_unit_targets(SCHEMA)      # {'norepinephrine': 'mcg/kg/min', ...}
+converted, counts = standardize_med_dose_units(mac_df, targets, vitals_df=vitals_df)
+```
+
+Schema files are **always supplied externally and parsed** — clifpy vendors no
+copy and assumes no default location, because the schemas change independently
+of the library and a stale bundled copy would silently standardize data to the
+wrong units.
+
+Categories your data contains but the schema omits are **not** an error: they
+keep their own base units and are reported per row in `_convert_status`. This is
+why `standardize_med_dose_units` defaults to `override=True`, unlike the
+lower-level converter.
+
+### Other schema formats
+
+Readers are registered per file extension (`.csv`, `.yaml`, `.yml`, `.json`,
+`.parquet` built in). Adding one is a small function plus a registration:
+
+```python
+from clifpy.utils.unit_converter import register_target_reader
+import pandas as pd, tomllib
+
+def read_toml_targets(source):
+    with open(source, "rb") as fh:
+        data = tomllib.load(fh)
+    return pd.DataFrame(data["targets"])
+
+register_target_reader(".toml", read_toml_targets)
+```
+
+Every reader just returns a DataFrame; validation, NA filtering and
+dict-building happen once inside `load_dose_unit_targets`.
+
+The schema's own column names are separate parameters from your data's, because
+they are different artefacts. To read the volume-infusion targets out of the
+same continuous file:
+
+```python
+volume_targets = load_dose_unit_targets(
+    SCHEMA, unit_col="volume_infusion_rate_units")
+```
+
+!!! warning "CLIF 3.0 lists two categories twice, with conflicting targets"
+    `epoprostenol` appears as both `ng/kg/min` and `mcg/kg/min` (a factor of
+    1000), and `terbutaline` as both `mg` and `mcg/kg/min` (different unit
+    classes). `load_dose_unit_targets` keeps the **first** occurrence so the
+    result never depends on row order, and logs a warning naming each conflict.
+    Override deliberately if you need the other:
+
+    ```python
+    targets = load_dose_unit_targets(SCHEMA)
+    targets["epoprostenol"] = "ng/kg/min"
+    ```
+
 ## Standardize dose units by medication
 
 In the most common use cases, we want to **standardize dose units by medication and pattern of administration** -- all propofol doses to be presented in mcg/kg/min in the continuous table and in mcg in the intermittent table, for example.
@@ -109,14 +197,33 @@ The set of base units are:
 
 - **`rate`**: Dose per time units (e.g., mcg/min, ml/hr, u/kg/hr)
 - **`amount`**: Total dose units (e.g., mcg, ml, u)
+- **`countable`**: Countable dosage forms (tablet, drop, puff, patch, dose). Understood, but *never convertible* — "1 tablet" carries no dose without the product strength, which CLIF does not record. The dose passes through untouched.
 - **`unrecognized`**: Units that cannot be parsed or converted
+
+A missing unit is not a class: an empty string, or one of `nan`, `None`,
+`null`, `unspecified`, `*unspecified`, `unknown`, becomes NULL and reports as
+`original unit is missing`. Site-local junk codes such as `asord` or `XX` stay
+`unrecognized`, because collapsing them to "missing" would hide a real
+data-quality signal.
 
 ### Unit Subclasses
 
-- **`mass`**: Weight-based units (mcg, mg, ng, g)
-- **`volume`**: Volume-based units (ml, l)
-- **`unit`**: Unit-based dosing (u, mu)
+- **`mass`**: mcg, mg, ng, g → base `mcg`
+- **`volume`**: ml, l, mcl → base `ml`
+- **`unit`**: u, mu (milli-units), mnu (million units) → base `u`
+- **`equivalent`**: meq → base `meq`
+- **`substance`**: mmol → base `mmol`
+- **`cell_count`**: cells → base `cells` (CAR-T products)
+- **`gas_fraction`**: ppm → base `ppm` (nitric oxide)
 - **`unrecognized`**: Units that don't fit standard categories
+
+`meq`, `mmol`, `cells` and `ppm` are each their own base. Converting mEq to mg
+would need the ion's valence and molar mass, which the medication tables do not
+carry, so cross-subclass conversion is refused rather than guessed. Within a
+family the arithmetic is ordinary: `mEq/hr → mEq/min` works fine.
+
+`ppm` and `cells` are also kept out of the weight and time axes — `ppm/kg/min`
+is not a meaningful unit — so they convert only to themselves.
 
 Unit class and subclass compatibility determines whether conversions are allowed. For example:
 
@@ -160,6 +267,22 @@ Unit class and subclass compatibility determines whether conversions are allowed
 | rate | unit | u/kg/hr | U/kg/hr, u/kg/h, units/kg/hour | u/min |
 | rate | unit | u/lb/min | U/lb/min, units/lb/minute | u/min |
 | rate | unit | u/lb/hr | U/lb/hr, units/lb/hour, unit/lb/hr | u/min |
+| **CLIF 3.0 additions** |
+| amount | unit | mnu | million units, Million Units, MMU | u |
+| amount | equivalent | meq | mEq, MEQ | meq |
+| amount | substance | mmol | mmol, MMOL | mmol |
+| amount | cell_count | cells | cells | cells |
+| amount | gas_fraction | ppm | ppm, PPM | ppm |
+| amount | volume | mcl | microliter, microlitre, µL, μL | ml |
+| amount | mass | ng | nanogram, nanograms | mcg |
+| rate | mass | mcg/kg/day | mcg/kg/day, mcg/kg/24hr | mcg/kg/min |
+| rate | equivalent | meq/hr | mEq/hr, mEq/HR | meq/min |
+| countable | — | tablet | tablet, Tablet., tab | *(not converted)* |
+| countable | — | drop | drop, puff, patch, spray, dose, each, ... | *(not converted)* |
+
+The time axis is `/min` (base), `/hr` and `/day`; the weight axis is `/kg`,
+`/lb` or none. Any base token combines with both, so `meq/kg/day` and
+`mmol/lb/hr` are accepted even though nothing in mCIDE targets them.
 
 ### Important Notes
 
@@ -167,7 +290,68 @@ Unit class and subclass compatibility determines whether conversions are allowed
 - **Acceptable Variations**: Raw `med_dose_unit` strings in your original DataFrame that the converter can detect and clean (these are NOT acceptable formats for preferred units)
 - **_base_unit**: The standardized unit all conversions target (mcg/min, ml/min, u/min for rates; mcg, ml, u for amounts)
 
+### Unit family spelling
 
+CLIF 3.0 mCIDE spells the unit family out (`units/hr`, `milli-units/min`) while
+abbreviating mass and volume (`mcg`, `ml`). clifpy matches that:
+
+- **Input** accepts both spellings. `units/kg/hr` and `u/kg/hr` are the same unit; existing code passing `u/min` is unaffected.
+- **Output** echoes whatever *you* asked for. Request `u/min` and you get `u/min`; request `units/min` and you get `units/min`, so an mCIDE schema round-trips exactly.
+- Where clifpy picks the unit itself — a category with no entry in `preferred_units` — it renders `units`, `milli-units` or `million-units`.
+
+!!! warning "`MU` is never accepted as an abbreviation"
+    In clinical use `MU` means million units and `mU` means milliunits,
+    differing only by case — and the converter lowercases before it sees the
+    string. Only the unambiguous spellings (`million units`, `MMU`) are read as
+    million units; a bare `mu` always means milli-units. The two are a factor
+    of 10⁹ apart.
+
+
+
+## Converting a different column
+
+The converter is not tied to `med_dose` / `med_dose_unit`. All six column names
+are parameters, so the same machinery standardizes any dose-like pair — for
+example `volume_infusion_rate`, which mCIDE targets at `ml/hr` for 72 of its 77
+continuous categories:
+
+```python
+converted, counts = convert_dose_units_by_med_category(
+    mac_df,
+    preferred_units={cat: "ml/hr" for cat in categories},
+    dose_col="volume_infusion_rate",
+    unit_col="volume_infusion_rate_unit",
+    converted_dose_col="volume_infusion_rate_converted",
+    converted_unit_col="volume_infusion_rate_unit_converted",
+)
+```
+
+`category_col` and `time_col` are available too. Defaults reproduce the previous
+behaviour exactly.
+
+Your other columns are safe: a `medication_admin_continuous` row carries both
+`med_dose` and `volume_infusion_rate`, and converting one leaves the other
+untouched. Column names must be plain SQL identifiers
+(`[A-Za-z_][A-Za-z0-9_]*`); anything else is rejected rather than escaped.
+
+## Extending the countable vocabulary
+
+`_unit_class = 'countable'` is backed by 21 tokens covering 99.95% of countable
+volume across the consortium. If your site uses others, pass them rather than
+editing clifpy:
+
+```python
+from clifpy.utils.unit_converter import DEFAULT_COUNTABLE_UNITS
+
+converted, counts = convert_dose_units_by_med_category(
+    mac_df,
+    preferred_units=prefs,
+    countable_units=set(DEFAULT_COUNTABLE_UNITS) | {"troche", "lozenge"},
+)
+```
+
+Matching is exact set membership, never a regex — `mg/kg/dose` is a prescribing
+rate, not a dosage form, and a regex on `dose` would wrongly capture it.
 
 ## Error Handling
 
@@ -175,19 +359,31 @@ Unit class and subclass compatibility determines whether conversions are allowed
 
 After conversion, each record includes a `_convert_status` field indicating the outcome:
 
-- **`success`**: Conversion completed successfully
-- **`original unit is missing`**: No unit provided in source data
-- **`original unit [unit] is not recognized`**: Input unit cannot be parsed
-- **`user-preferred unit [unit] is not recognized`**: Target unit is invalid
-- **`cannot convert [class1] to [class2]`**: Incompatible unit classes (e.g., rate → amount)
-- **`cannot convert [subclass1] to [subclass2]`**: Incompatible unit subclasses (e.g., mass → volume)
-- **`cannot convert to a weighted unit if weight_kg is missing`**: Weight-based conversion attempted without patient weight
+Evaluated in this order — the first matching branch wins:
+
+1. **`original unit is missing`**: no unit recorded (empty, or a placeholder such as `nan`, `*Unspecified`, `unknown`)
+2. **`original unit [unit] is a countable dosage form; not convertible`**: a tablet, drop, puff, patch, dose, and similar
+3. **`original unit [unit] is not recognized`**: input unit cannot be parsed
+4. **`user-preferred unit [unit] is not recognized`**: target unit is invalid
+5. **`cannot convert [class1] to [class2]`**: incompatible unit classes (e.g. rate → amount)
+6. **`cannot convert [subclass1] to [subclass2]`**: incompatible subclasses (e.g. `cannot convert equivalent to mass` for mEq → mg)
+7. **`cannot convert weighted to unweighted: weight_kg is missing`**
+8. **`cannot convert unweighted to weighted: weight_kg is missing`**
+9. **`success`**
+
+!!! note "Statuses 7 and 8 replaced an older single message"
+    Earlier versions reported `cannot convert to a weighted unit if weight_kg
+    is missing` for both directions.
 
 ### Failure Handling
 
 When conversion fails:
-- `med_dose_converted` = original `_base_dose` (or original dose if base conversion failed)
-- `med_dose_unit_converted` = `_clean_unit` (or original unit if cleaning failed)
+
+- `med_dose_converted` = original `med_dose` (or `_base_dose` if `med_dose` is absent)
+
+- `med_dose_unit_converted` = `_clean_unit` (or `_base_unit` if cleaning failed)
+
+The dose is never silently scaled on a failure path.
 
 ## Alternative: Direct Unit Converter Usage
 
