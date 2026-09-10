@@ -65,6 +65,43 @@ CANONICAL_UNIT_SPELLING = {
     'mnu': 'million-units',
 }
 
+# Strings that mean "no unit was recorded". Routed to NULL so they report as
+# 'original unit is missing' rather than masquerading as unrecognised units.
+#
+# NOTE: 'nan'/'none' show up as literal strings only when a frame has been
+# round-tripped through a text format -- a CSV export of a pandas frame, say.
+# In a live DataFrame they are already NULL. Normalising them is defensive, not
+# a fix for a converter bug.
+#
+# Deliberately NOT included: site-local junk codes such as 'asord', 'zzbag',
+# 'xx'. Those genuinely ARE unrecognised, and collapsing them to NULL would
+# hide a real data-quality signal.
+MISSING_UNIT_PLACEHOLDERS = frozenset({
+    'nan', 'none', 'null', 'unspecified', '*unspecified', 'unknown',
+})
+
+# Countable dosage forms. A tablet or a drop carries no dose information
+# without the product strength, so these are never convertible -- across the
+# 11-site consortium inventory the median value for every one of them is 1.
+# Classifying them separately keeps `_convert_status` honest: "countable dosage
+# form" is actionable, "not recognized" is not.
+#
+# Chosen by measurement, not guesswork. The countable pool is 53 distinct
+# tokens but extremely top-heavy -- `tablet` alone is 51% of the volume and the
+# top six reach 96%. These 21 tokens cover 99.95%; the omitted tail totals
+# ~1,957 observations. Callers with local vocabulary pass `countable_units=`
+# rather than editing this set.
+#
+# NOTE: matched by EXACT set membership, never by regex. `mg/kg/dose` is a
+# prescribing rate, not a dosage form, and a regex on 'dose' would capture it.
+DEFAULT_COUNTABLE_UNITS = frozenset({
+    'tablet', 'tab', 'capsule', 'cap',
+    'dose', 'drop', 'puff', 'patch', 'spray',
+    'application', 'applicator', 'applicatorful', 'appl',
+    'each', 'packet', 'enema', 'bag', 'film',
+    'vial', 'syringe', 'suppository', 'bottle', 'half-tab',
+})
+
 AMOUNT_ENDER = "($|/*)"
 
 # ===========================================================================

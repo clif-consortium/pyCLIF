@@ -6,7 +6,7 @@ temp-table lifecycle, and preserves timezone metadata across the pipeline.
 
 import pandas as pd
 import duckdb
-from typing import Tuple, List, Union, Literal, overload
+from typing import Tuple, List, Union, Literal, Collection, overload
 from duckdb import DuckDBPyRelation
 
 from clifpy.utils.logging_config import get_logger
@@ -105,6 +105,7 @@ def convert_dose_units_by_med_category(
     return_rel: bool = False,
     id_name: str = 'hospitalization_id',
     fallback_on_earliest: bool = False,
+    countable_units: Collection[str] | None = None,
 ) -> Union[Tuple[pd.DataFrame, pd.DataFrame], Tuple[DuckDBPyRelation, DuckDBPyRelation]]:
     """Convert medication dose units to preferred units, weight-aware and DuckDB-native.
 
@@ -290,7 +291,8 @@ def convert_dose_units_by_med_category(
         # --------------------------------------------------------------
         try:
             med_df_base, _ = standardize_dose_to_base_units(
-                med_df, vitals_df, show_intermediate=show_intermediate, id_name=id_name
+                med_df, vitals_df, show_intermediate=show_intermediate,
+                id_name=id_name, countable_units=countable_units,
             )
         except ValueError as e:
             raise ValueError(f"Error standardizing dose units to base units: {e}")

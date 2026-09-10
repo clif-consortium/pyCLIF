@@ -8,7 +8,7 @@ empty-to-NULL, then `_clean_dose_unit_names*` rewrites spelling variants
 import pandas as pd
 import duckdb
 
-from ._grammar import UNIT_NAMING_VARIANTS
+from ._grammar import UNIT_NAMING_VARIANTS, MISSING_UNIT_PLACEHOLDERS
 
 
 def _clean_dose_unit_formats(s: pd.Series) -> pd.Series:
@@ -78,9 +78,29 @@ def _clean_dose_unit_formats_duckdb(
     >>> list(result['_clean_unit'])
     ['ml/hr', 'mcg/kg/min', 'mg/hr']
     """
+    # Applied in order:
+    #   1. lowercase
+    #   2. drop a trailing period      -- `Tablet.` is 182,690 observations on
+    #      its own, and without this it classifies differently from `tablet`
+    #   3. drop a trailing parenthetical or route qualifier
+    #      -- `g (central catheter)`, `units/hr (prepared by dialysis staff)`
+    #   4. strip all whitespace
+    #   5. map '' and the placeholder strings to NULL, so they report as
+    #      'original unit is missing' rather than as unrecognised units
+    placeholders = "', '".join(sorted(MISSING_UNIT_PLACEHOLDERS))
+    cleaned = (
+        f"regexp_replace("
+        f"  regexp_replace("
+        f"    regexp_replace(lower({col}), '\\.\\s*$', ''),"
+        f"    '\\s*\\([^)]*\\)\\s*$|\\s+(given|central line)\\s*$', ''),"
+        f"  '\\s+', '', 'g')"
+    )
     return duckdb.sql(f"""
         SELECT *,
-            NULLIF(lower(regexp_replace({col}, '\\s+', '', 'g')), '') as {out_col}
+            CASE
+                WHEN {cleaned} IN ('', '{placeholders}') THEN NULL
+                ELSE {cleaned}
+            END as {out_col}
         FROM relation
     """)
     

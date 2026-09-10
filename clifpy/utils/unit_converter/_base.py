@@ -7,7 +7,7 @@ references patient weight.
 
 import pandas as pd
 import duckdb
-from typing import Tuple
+from typing import Tuple, Collection
 
 from clifpy.utils.logging_config import get_logger
 
@@ -15,6 +15,7 @@ from ._grammar import (
     KG_PER_LB, AMOUNT_FACTOR_PATTERNS, TIME_FACTOR_PATTERNS,
     SUBCLASS_REGEX, MASS_REGEX, VOLUME_REGEX, UNIT_REGEX,
     LB_REGEX, WEIGHT_REGEX, RATE_UNITS_STR, AMOUNT_UNITS_STR,
+    DEFAULT_COUNTABLE_UNITS, _convert_set_to_str_for_sql,
 )
 from ._sql import (
     _concat_builders_by_patterns,
@@ -29,7 +30,8 @@ logger = get_logger('utils.unit_converter')
 
 def _convert_clean_units_to_base_units(
     med_df: pd.DataFrame | duckdb.DuckDBPyRelation,
-    show_intermediate: bool = False
+    show_intermediate: bool = False,
+    countable_units: Collection[str] | None = None
 ) -> duckdb.DuckDBPyRelation:
     """Convert clean dose units to base units (weight-preserving).
 
@@ -76,6 +78,14 @@ def _convert_clean_units_to_base_units(
     exactly via factor 1×1.
     """
 
+    # Countable dosage forms pass through untouched, exactly like unrecognized
+    # units; only the reported class and status differ.
+    countable_units_str = _convert_set_to_str_for_sql(
+        set(DEFAULT_COUNTABLE_UNITS if countable_units is None else countable_units)
+    )
+    # Classes whose dose must not be scaled.
+    passthrough = "('unrecognized', 'countable')"
+
     amount_clause = _concat_builders_by_patterns(
         builder=_pattern_to_factor_builder_for_base,
         patterns=AMOUNT_FACTOR_PATTERNS,
@@ -120,29 +130,30 @@ def _convert_clean_units_to_base_units(
             , _unit_class: CASE
                 WHEN _clean_unit IN ('{RATE_UNITS_STR}') THEN 'rate'
                 WHEN _clean_unit IN ('{AMOUNT_UNITS_STR}') THEN 'amount'
+                WHEN _clean_unit IN ('{countable_units_str}') THEN 'countable'
                 ELSE 'unrecognized' END
             , _amount_multiplier: CASE
-                WHEN _unit_class = 'unrecognized' THEN 1 ELSE ({amount_clause}) END
+                WHEN _unit_class IN {passthrough} THEN 1 ELSE ({amount_clause}) END
             , _time_multiplier: CASE
-                WHEN _unit_class = 'unrecognized' THEN 1 ELSE ({time_clause}) END
+                WHEN _unit_class IN {passthrough} THEN 1 ELSE ({time_clause}) END
             , _weight_multiplier: CASE
-                WHEN _unit_class = 'unrecognized' THEN 1 ELSE ({weight_const_expr}) END
+                WHEN _unit_class IN {passthrough} THEN 1 ELSE ({weight_const_expr}) END
             -- amount + time + (constant) lb→kg scaling. No patient weight.
             , _base_dose: CASE
-                WHEN _unit_class = 'unrecognized' THEN med_dose
+                WHEN _unit_class IN {passthrough} THEN med_dose
                 ELSE med_dose * _amount_multiplier * _time_multiplier * _weight_multiplier
                 END
             -- base unit collapses /lb into /kg; unweighted stays unweighted
             , _base_unit: CASE
-                WHEN _unit_class = 'unrecognized' THEN _clean_unit
+                WHEN _unit_class IN {passthrough} THEN _clean_unit
                 {base_unit_ladder}
                 END
         FROM med_df
         """
     else:
-        amount_expr = f"CASE WHEN _unit_class = 'unrecognized' THEN 1 ELSE ({amount_clause}) END"
-        time_expr = f"CASE WHEN _unit_class = 'unrecognized' THEN 1 ELSE ({time_clause}) END"
-        weight_expr = f"CASE WHEN _unit_class = 'unrecognized' THEN 1 ELSE ({weight_const_expr}) END"
+        amount_expr = f"CASE WHEN _unit_class IN {passthrough} THEN 1 ELSE ({amount_clause}) END"
+        time_expr = f"CASE WHEN _unit_class IN {passthrough} THEN 1 ELSE ({time_clause}) END"
+        weight_expr = f"CASE WHEN _unit_class IN {passthrough} THEN 1 ELSE ({weight_const_expr}) END"
 
         q = f"""
         WITH classified AS (
@@ -150,16 +161,17 @@ def _convert_clean_units_to_base_units(
                 , _unit_class: CASE
                     WHEN _clean_unit IN ('{RATE_UNITS_STR}') THEN 'rate'
                     WHEN _clean_unit IN ('{AMOUNT_UNITS_STR}') THEN 'amount'
+                    WHEN _clean_unit IN ('{countable_units_str}') THEN 'countable'
                     ELSE 'unrecognized' END
             FROM med_df
         )
         SELECT *
             , _base_dose: CASE
-                WHEN _unit_class = 'unrecognized' THEN med_dose
+                WHEN _unit_class IN {passthrough} THEN med_dose
                 ELSE med_dose * ({amount_expr}) * ({time_expr}) * ({weight_expr})
                 END
             , _base_unit: CASE
-                WHEN _unit_class = 'unrecognized' THEN _clean_unit
+                WHEN _unit_class IN {passthrough} THEN _clean_unit
                 {base_unit_ladder}
                 END
         FROM classified
@@ -172,6 +184,7 @@ def standardize_dose_to_base_units(
     vitals_df: pd.DataFrame = None,
     show_intermediate: bool = False,
     id_name: str = 'hospitalization_id',
+    countable_units: Collection[str] | None = None,
 ) -> Tuple[duckdb.DuckDBPyRelation, duckdb.DuckDBPyRelation]:
     """Standardize medication dose units to a base set of standard units.
 
@@ -285,7 +298,11 @@ def standardize_dose_to_base_units(
     logger.debug("Cleaning unit names...")
     med_df_cleaned = _clean_dose_unit_names_duckdb(med_df_cleaned)
     logger.debug("Converting to base units...")
-    med_df_base = _convert_clean_units_to_base_units(med_df_cleaned, show_intermediate=show_intermediate)
+    med_df_base = _convert_clean_units_to_base_units(
+        med_df_cleaned,
+        show_intermediate=show_intermediate,
+        countable_units=countable_units,
+    )
     convert_counts_df = _create_unit_conversion_counts_table(
         med_df_base,
         group_by=['med_dose_unit', '_clean_unit', '_base_unit', '_unit_class']

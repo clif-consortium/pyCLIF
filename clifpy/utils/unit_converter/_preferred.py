@@ -258,6 +258,12 @@ def _convert_base_units_to_preferred_units(
             , _convert_status: CASE
                 WHEN _base_unit IS NULL
                     THEN 'original unit is missing'
+                -- Countable dosage forms are understood but inherently
+                -- unconvertible: "1 tablet" carries no dose without the
+                -- product strength. Distinguishing them from genuinely
+                -- unparseable strings is the point of the class.
+                WHEN _unit_class = 'countable'
+                    THEN 'original unit ' || _base_unit || ' is a countable dosage form; not convertible'
                 WHEN _unit_class = 'unrecognized' OR _unit_subclass = 'unrecognized'
                     THEN 'original unit ' || _base_unit || ' is not recognized'
                 WHEN _unit_class_preferred = 'unrecognized' OR _unit_subclass_preferred = 'unrecognized'
