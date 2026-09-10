@@ -22,7 +22,7 @@ rn,case,med_category,med_dose,med_dose_unit,_clean_unit,_weighted,weight_kg,_bas
 20,valid,insulin,6,milli-unit,mu,0,90,0.006,u,amount,
 21,invalid,fentanyl,6,kg,kg,0,91,6,kg,unrecognized,kg is not recognized
 22,valid,fentanyl,6,gram,g,0,92,6000000,mcg,amount,
-23,invalid,propofol,6,mEq,meq,0,93,6,meq,unrecognized,mEq is not recognized
+23,valid,propofol,6,mEq,meq,0,93,6,meq,amount,mEq is its own base (equivalent subclass); mEq->mass is blocked in stage 2
 24,invalid,propofol,6,%,%,0,94,6,%,unrecognized,% not supported
 25,invalid,propofol,6,IU,iu,0,95,6,iu,unrecognized,IU not supported
 26,invalid,propofol,6,,,0,96,6,,unrecognized,empty string not supported

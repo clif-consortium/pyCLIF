@@ -15,9 +15,12 @@ from ._grammar import (
     KG_PER_LB, AMOUNT_FACTOR_PATTERNS, TIME_FACTOR_PATTERNS,
     SUBCLASS_REGEX, MASS_REGEX, VOLUME_REGEX, UNIT_REGEX,
     LB_REGEX, WEIGHT_REGEX, RATE_UNITS_STR, AMOUNT_UNITS_STR,
-    HR_REGEX, L_REGEX, MU_REGEX, MG_REGEX, NG_REGEX, G_REGEX,
 )
-from ._sql import _concat_builders_by_patterns, _pattern_to_factor_builder_for_base
+from ._sql import (
+    _concat_builders_by_patterns,
+    _pattern_to_factor_builder_for_base,
+    _base_unit_case_ladder,
+)
 from ._clean import _clean_dose_unit_formats_duckdb, _clean_dose_unit_names_duckdb
 from ._counts import _create_unit_conversion_counts_table
 
@@ -75,13 +78,13 @@ def _convert_clean_units_to_base_units(
 
     amount_clause = _concat_builders_by_patterns(
         builder=_pattern_to_factor_builder_for_base,
-        patterns=[L_REGEX, MU_REGEX, MG_REGEX, NG_REGEX, G_REGEX],
+        patterns=AMOUNT_FACTOR_PATTERNS,
         else_case='1'
         )
 
     time_clause = _concat_builders_by_patterns(
         builder=_pattern_to_factor_builder_for_base,
-        patterns=[HR_REGEX],
+        patterns=TIME_FACTOR_PATTERNS,
         else_case='1'
         )
 
@@ -107,6 +110,9 @@ def _convert_clean_units_to_base_units(
         f"CASE WHEN regexp_matches(_clean_unit, '{WEIGHT_REGEX}') THEN '/kg' "
         f"ELSE '' END"
     )
+    # One branch pair per subclass, derived from SUBCLASS_SPEC. Standalone
+    # subclasses (ppm, cells) get a single amount branch with no qualifier.
+    base_unit_ladder = _base_unit_case_ladder(base_weight_qual_expr)
 
     if show_intermediate:
         q = f"""
@@ -129,21 +135,7 @@ def _convert_clean_units_to_base_units(
             -- base unit collapses /lb into /kg; unweighted stays unweighted
             , _base_unit: CASE
                 WHEN _unit_class = 'unrecognized' THEN _clean_unit
-                WHEN _unit_class = 'rate' AND regexp_matches(_clean_unit, '{MASS_REGEX}')
-                    THEN 'mcg' || ({base_weight_qual_expr}) || '/min'
-                WHEN _unit_class = 'rate' AND regexp_matches(_clean_unit, '{VOLUME_REGEX}')
-                    THEN 'ml' || ({base_weight_qual_expr}) || '/min'
-                WHEN _unit_class = 'rate' AND regexp_matches(_clean_unit, '{UNIT_REGEX}')
-                    THEN 'u' || ({base_weight_qual_expr}) || '/min'
-                -- amount branches mirror rate branches: append the canonical
-                -- weight qualifier (`/kg` or `''`) so weighted amounts like
-                -- `mcg/kg`, `mg/kg`, `mcg/lb` round-trip through stage 1.
-                WHEN _unit_class = 'amount' AND regexp_matches(_clean_unit, '{MASS_REGEX}')
-                    THEN 'mcg' || ({base_weight_qual_expr})
-                WHEN _unit_class = 'amount' AND regexp_matches(_clean_unit, '{VOLUME_REGEX}')
-                    THEN 'ml' || ({base_weight_qual_expr})
-                WHEN _unit_class = 'amount' AND regexp_matches(_clean_unit, '{UNIT_REGEX}')
-                    THEN 'u' || ({base_weight_qual_expr})
+                {base_unit_ladder}
                 END
         FROM med_df
         """
@@ -168,21 +160,7 @@ def _convert_clean_units_to_base_units(
                 END
             , _base_unit: CASE
                 WHEN _unit_class = 'unrecognized' THEN _clean_unit
-                WHEN _unit_class = 'rate' AND regexp_matches(_clean_unit, '{MASS_REGEX}')
-                    THEN 'mcg' || ({base_weight_qual_expr}) || '/min'
-                WHEN _unit_class = 'rate' AND regexp_matches(_clean_unit, '{VOLUME_REGEX}')
-                    THEN 'ml' || ({base_weight_qual_expr}) || '/min'
-                WHEN _unit_class = 'rate' AND regexp_matches(_clean_unit, '{UNIT_REGEX}')
-                    THEN 'u' || ({base_weight_qual_expr}) || '/min'
-                -- amount branches mirror rate branches: append the canonical
-                -- weight qualifier (`/kg` or `''`) so weighted amounts like
-                -- `mcg/kg`, `mg/kg`, `mcg/lb` round-trip through stage 1.
-                WHEN _unit_class = 'amount' AND regexp_matches(_clean_unit, '{MASS_REGEX}')
-                    THEN 'mcg' || ({base_weight_qual_expr})
-                WHEN _unit_class = 'amount' AND regexp_matches(_clean_unit, '{VOLUME_REGEX}')
-                    THEN 'ml' || ({base_weight_qual_expr})
-                WHEN _unit_class = 'amount' AND regexp_matches(_clean_unit, '{UNIT_REGEX}')
-                    THEN 'u' || ({base_weight_qual_expr})
+                {base_unit_ladder}
                 END
         FROM classified
         """

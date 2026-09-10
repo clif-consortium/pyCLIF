@@ -4,7 +4,12 @@ Kept separate from the grammar so the SQL-generation strategy can change
 without touching the vocabulary, and vice versa.
 """
 
-from ._grammar import REGEX_TO_FACTOR_MAPPER
+from ._grammar import (
+    REGEX_TO_FACTOR_MAPPER,
+    SUBCLASS_SPEC,
+    SUBCLASS_REGEX,
+    STANDALONE_SUBCLASSES,
+)
 
 
 def _concat_builders_by_patterns(builder: callable, patterns: list, else_case: str = '1') -> str:
@@ -128,3 +133,92 @@ def _pattern_to_factor_builder_for_preferred(pattern: str) -> str:
         return f"WHEN regexp_matches(_preferred_unit_clean, '{pattern}') THEN 1/({REGEX_TO_FACTOR_MAPPER.get(pattern)})"
     raise ValueError(f"regex pattern {pattern} not found in REGEX_TO_FACTOR_MAPPER dict")
 
+
+
+def _subclass_case_ladder(col: str, indent: str = ' ' * 16) -> str:
+    """Build the CASE branches that map a unit column to its subclass name.
+
+    Derived from `SUBCLASS_SPEC`, so a new unit family needs no edit here.
+    Emits only the WHEN branches; the caller supplies `CASE`, any preceding
+    branches, the `ELSE` and the `END`.
+
+    Parameters
+    ----------
+    col : str
+        Name of the unit column to classify (e.g. `_base_unit`).
+    indent : str, default 16 spaces
+        Leading whitespace for continuation lines, for readable generated SQL.
+
+    Returns
+    -------
+    str
+        Newline-joined `WHEN regexp_matches(...) THEN '<subclass>'` branches.
+
+    Examples
+    --------
+    >>> ladder = _subclass_case_ladder('_base_unit')
+    >>> "THEN 'mass'" in ladder and "THEN 'volume'" in ladder
+    True
+    """
+    return f"\n{indent}".join(
+        f"WHEN regexp_matches({col}, '{SUBCLASS_REGEX[name]}') THEN '{name}'"
+        for name in SUBCLASS_SPEC
+    )
+
+
+def _base_unit_case_ladder(
+    weight_qual_expr: str,
+    col: str = '_clean_unit',
+    indent: str = ' ' * 16,
+) -> str:
+    """Build the `_base_unit` CASE branches for every subclass.
+
+    Each non-standalone subclass gets two branches -- one for rates (canonical
+    base + weight qualifier + `/min`) and one for amounts (canonical base +
+    weight qualifier). Standalone subclasses (`ppm`, `cells`) get a single
+    amount branch with no qualifier, since they carry neither axis.
+
+    Derived from `SUBCLASS_SPEC` and `STANDALONE_SUBCLASSES`, replacing what
+    were four hand-synchronised copies of this ladder.
+
+    Parameters
+    ----------
+    weight_qual_expr : str
+        SQL expression yielding the canonical weight qualifier (`'/kg'` or
+        `''`). Stage 1 collapses `/lb` into `/kg`, so this is NOT
+        `_weight_qual_clause`.
+    col : str, default '_clean_unit'
+        Unit column the branches match against.
+    indent : str, default 16 spaces
+        Leading whitespace for continuation lines.
+
+    Returns
+    -------
+    str
+        Newline-joined `WHEN ... THEN ...` branches, ordered rate-then-amount
+        within each subclass. The caller supplies `CASE`, the preceding
+        unrecognized branch, and `END`.
+    """
+    parts = []
+    for name, spec in SUBCLASS_SPEC.items():
+        rx = SUBCLASS_REGEX[name]
+        base = spec['base']
+        if name in STANDALONE_SUBCLASSES:
+            # No weight or time axis: the token is already the base unit.
+            parts.append(
+                f"WHEN _unit_class = 'amount' AND regexp_matches({col}, '{rx}')"
+                f"\n{indent}    THEN '{base}'"
+            )
+            continue
+        parts.append(
+            f"WHEN _unit_class = 'rate' AND regexp_matches({col}, '{rx}')"
+            f"\n{indent}    THEN '{base}' || ({weight_qual_expr}) || '/min'"
+        )
+        # Amount branches mirror rate branches: append the canonical weight
+        # qualifier (`/kg` or `''`) so weighted amounts like `mcg/kg`, `mg/kg`
+        # and `mcg/lb` round-trip through stage 1.
+        parts.append(
+            f"WHEN _unit_class = 'amount' AND regexp_matches({col}, '{rx}')"
+            f"\n{indent}    THEN '{base}' || ({weight_qual_expr})"
+        )
+    return f"\n{indent}".join(parts)

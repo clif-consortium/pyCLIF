@@ -21,20 +21,48 @@ KG_PER_LB = 2.20462
 
 
 UNIT_NAMING_VARIANTS = {
-    # time
+    # NOTE: applied as nested regexp_replace in INSERTION ORDER, so position
+    # here is semantic. Each block's ordering constraint is called out below.
+
+    # time -- '/day' precedes '/hr' so `/24hr` is not partially consumed
+    '/day': '/(day|24hr|24hour)$',
     '/hr': '/h(r|our)?$',
     '/min': '/m(in|inute)?$',
     # unit -- NOTE: plaural always go first to avoid having result like "us" or "gs"
+    #
+    # CRITICAL: million-units MUST precede both 'u' and 'milli-?'. Otherwise
+    # `u(nits|nit)?` rewrites "millionunits" -> "millionu", then `milli-?`
+    # rewrites that -> "monu", and the dose silently fails to convert.
+    # Deliberately NOT accepted here: a bare `mu` meaning million units. In
+    # clinical use `MU` is million units and `mU` is milliunits -- an ISMP
+    # error-prone abbreviation separated only by case, and case is already
+    # gone by this point. Only the unambiguous spellings are recognised.
+    'mnu': '(million|mm)-?u(nits|nit)?',
     'u': 'u(nits|nit)?',
     # milli
     'm': 'milli-?',
-    # volume
+    # volume -- 'mcl' precedes 'l', which would otherwise rewrite
+    # "microliter" -> "microl" and lose the micro- prefix
+    'mcl': '^(microliters?|microlitres?|µl|μl)',
     "l": 'l(iters|itres|itre|iter)?'    ,
-    # mass
-    'mcg': '^(u|µ|μ)g',
+    # mass -- 'ng' precedes 'g'; both are anchored so they cannot overlap
+    'ng': '^nanograms?',
+    'mcg': '^(u|µ|μ)g|^micrograms?',
     'g': '^g(rams|ram)?',
     # dose
     # 'dose': '^doses?',
+}
+
+# Canonical output spelling, applied only when rendering the converted unit.
+#
+# CLIF 3.0 mCIDE spells the unit family out (`units/hr`, `milli-units/min`)
+# while abbreviating mass and volume (`mcg`, `ml`), so we match it exactly
+# rather than imposing internal consistency. Input still accepts both
+# spellings, so existing callers passing `u/min` are unaffected.
+CANONICAL_UNIT_SPELLING = {
+    'u': 'units',
+    'mu': 'milli-units',
+    'mnu': 'million-units',
 }
 
 AMOUNT_ENDER = "($|/*)"
@@ -56,24 +84,36 @@ AMOUNT_ENDER = "($|/*)"
 # and molar mass, which the medication tables do not carry, so the subclass
 # guard in `_convert_base_units_to_preferred_units` refuses it.
 SUBCLASS_SPEC = {
-    'mass':   {'tokens': ('mcg', 'mg', 'ng', 'g'), 'base': 'mcg'},
-    'volume': {'tokens': ('ml', 'l'),              'base': 'ml'},
-    'unit':   {'tokens': ('u', 'mu'),              'base': 'u'},
+    'mass':         {'tokens': ('mcg', 'mg', 'ng', 'g'),  'base': 'mcg'},
+    'volume':       {'tokens': ('ml', 'l', 'mcl'),        'base': 'ml'},
+    'unit':         {'tokens': ('u', 'mu', 'mnu'),        'base': 'u'},
+    'equivalent':   {'tokens': ('meq',),                  'base': 'meq'},
+    'substance':    {'tokens': ('mmol',),                 'base': 'mmol'},
+    'cell_count':   {'tokens': ('cells',),                'base': 'cells'},
+    'gas_fraction': {'tokens': ('ppm',),                  'base': 'ppm'},
 }
 
 # Subclasses kept OUT of the weight x time cartesian product: a gas fraction
 # or a cell count has no meaningful `/kg` or `/min` form. They convert only to
-# themselves.
-STANDALONE_SUBCLASSES: frozenset = frozenset()
+# themselves. CLIF 3.0 mCIDE targets bare `ppm` (nitric_oxide) and bare `cells`
+# (CAR-T products), matching this.
+#
+# NOTE: CAR-T doses are sometimes charted as `cells/kg`. To support that,
+# remove 'cell_count' from this set -- the weighted forms are then generated
+# automatically and nothing else needs to change.
+STANDALONE_SUBCLASSES = frozenset({'gas_fraction', 'cell_count'})
 
 # Multiplicative factor from each token to its subclass `base`. Values are SQL
 # expression strings, not numbers, because they are inlined into generated SQL.
-# Identity tokens (the bases themselves) are omitted and fall through to 1.
+# Identity tokens (the bases themselves) are omitted and fall through to 1;
+# `meq`, `mmol`, `cells` and `ppm` are their own base and appear nowhere here.
 TOKEN_TO_BASE_FACTOR = {
     # volume -> ml
     'l': '1000',
+    'mcl': '1/1000',      # microlitres
     # unit -> u
     'mu': '1/1000',       # milli-units
+    'mnu': '1000000',     # million units
     # mass -> mcg
     'mg': '1000',
     'ng': '1/1000',
@@ -81,8 +121,10 @@ TOKEN_TO_BASE_FACTOR = {
 }
 
 # Time axis. `/min` is the canonical base, so it is omitted (factor 1).
+# `/day` is required by mCIDE (tacrolimus is targeted at `mcg/kg/day`).
 TIME_TO_BASE_FACTOR = {
     '/hr': '1/60',
+    '/day': '1/1440',
 }
 
 ACCEPTABLE_WEIGHT_UNITS = ('/kg', '/lb', '')
@@ -203,11 +245,20 @@ def _weight_qual_clause(col: str) -> str:
 # Base amount tokens (no weight qualifier). The amount-axis "vocabulary"
 # shared by both `_acceptable_amount_units` and `_acceptable_rate_units`.
 ACCEPTABLE_BASE_AMOUNT_UNITS = {
-    "ml", "l", # volume
-    "mu", "u", # unit
-    "mcg", "mg", "ng", 'g' # mass
-    # "dose" # dose
-    }
+    token
+    for name, spec in SUBCLASS_SPEC.items()
+    if name not in STANDALONE_SUBCLASSES
+    for token in spec['tokens']
+}
+
+# Standalone amount units: accepted bare, but never combined with a weight or
+# time qualifier (see STANDALONE_SUBCLASSES).
+STANDALONE_AMOUNT_UNITS = {
+    token
+    for name, spec in SUBCLASS_SPEC.items()
+    if name in STANDALONE_SUBCLASSES
+    for token in spec['tokens']
+}
 
 def _acceptable_amount_units() -> Set[str]:
     """Generate all acceptable amount unit combinations (with optional weight qualifier).
@@ -243,8 +294,12 @@ def _acceptable_amount_units() -> Set[str]:
     --------
     _acceptable_rate_units : Same, plus a time axis.
     """
-    acceptable_weight_units = {'/kg', '/lb', ''}
-    return {a + b for a in ACCEPTABLE_BASE_AMOUNT_UNITS for b in acceptable_weight_units}
+    combined = {
+        a + b
+        for a in ACCEPTABLE_BASE_AMOUNT_UNITS
+        for b in ACCEPTABLE_WEIGHT_UNITS
+    }
+    return combined | set(STANDALONE_AMOUNT_UNITS)
 
 ACCEPTABLE_AMOUNT_UNITS = _acceptable_amount_units()
 
@@ -281,10 +336,13 @@ def _acceptable_rate_units() -> Set[str]:
     --------
     _acceptable_amount_units : Same, minus the time axis.
     """
-    acceptable_weight_units = {'/kg', '/lb', ''}
-    acceptable_time_units = {'/hr', '/min'}
     # find the cartesian product of the three sets
-    return {a + b + c for a in ACCEPTABLE_BASE_AMOUNT_UNITS for b in acceptable_weight_units for c in acceptable_time_units}
+    return {
+        a + b + c
+        for a in ACCEPTABLE_BASE_AMOUNT_UNITS
+        for b in ACCEPTABLE_WEIGHT_UNITS
+        for c in ACCEPTABLE_TIME_UNITS
+    }
 
 ACCEPTABLE_RATE_UNITS = _acceptable_rate_units()
 
@@ -326,3 +384,36 @@ def _convert_set_to_str_for_sql(s: Set[str]) -> str:
 
 RATE_UNITS_STR = _convert_set_to_str_for_sql(ACCEPTABLE_RATE_UNITS)
 AMOUNT_UNITS_STR = _convert_set_to_str_for_sql(ACCEPTABLE_AMOUNT_UNITS)
+
+
+def _canonical_spelling_expr(col: str) -> str:
+    """Build a SQL expression rewriting a unit's leading token to mCIDE spelling.
+
+    Applied only where clifpy chooses the unit itself (the fallback to
+    `_base_unit`). When the caller names a preferred unit, their spelling is
+    echoed back verbatim instead, so `u/min` in gives `u/min` out.
+
+    Tokens are rewritten longest-first (`mnu` before `mu` before `u`), and each
+    pattern is `^`-anchored, so no rewrite can cascade into another: once
+    `mnu/hr` becomes `million-units/hr` it no longer starts with `mu` or `u`.
+
+    Parameters
+    ----------
+    col : str
+        Unit column to rewrite.
+
+    Returns
+    -------
+    str
+        Nested `regexp_replace` expression.
+
+    Examples
+    --------
+    >>> expr = _canonical_spelling_expr('_base_unit')
+    >>> 'million-units' in expr and 'milli-units' in expr
+    True
+    """
+    expr = col
+    for token in sorted(CANONICAL_UNIT_SPELLING, key=lambda t: (-len(t), t)):
+        expr = f"regexp_replace({expr}, '^{token}', '{CANONICAL_UNIT_SPELLING[token]}')"
+    return expr

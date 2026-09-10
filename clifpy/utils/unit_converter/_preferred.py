@@ -13,10 +13,13 @@ from ._grammar import (
     KG_PER_LB, ALL_ACCEPTABLE_UNITS, AMOUNT_FACTOR_PATTERNS,
     TIME_FACTOR_PATTERNS, MASS_REGEX, VOLUME_REGEX, UNIT_REGEX,
     SUBCLASS_REGEX, RATE_UNITS_STR, AMOUNT_UNITS_STR,
-    HR_REGEX, L_REGEX, MU_REGEX, MG_REGEX, NG_REGEX, G_REGEX,
-    _weight_qual_clause,
+    _weight_qual_clause, _canonical_spelling_expr,
 )
-from ._sql import _concat_builders_by_patterns, _pattern_to_factor_builder_for_preferred
+from ._sql import (
+    _concat_builders_by_patterns,
+    _pattern_to_factor_builder_for_preferred,
+    _subclass_case_ladder,
+)
 
 logger = get_logger('utils.unit_converter')
 
@@ -149,6 +152,22 @@ def _convert_base_units_to_preferred_units(
         else:
             raise ValueError(error_msg)
 
+    # Unit rendered on success. When the caller named a preferred unit, echo
+    # their spelling verbatim (`u/min` in -> `u/min` out). When clifpy picked
+    # the unit itself -- the fallback to `_base_unit` for categories with no
+    # entry in `preferred_units` -- render it in the mCIDE vocabulary, which
+    # spells the unit family out (`units`, `milli-units`, `million-units`).
+    success_unit_expr = (
+        f"CASE WHEN _preferred_is_explicit THEN _preferred_unit "
+        f"ELSE {_canonical_spelling_expr('_preferred_unit')} END"
+        if '_preferred_is_explicit' in med_df.columns
+        else "_preferred_unit"
+    )
+
+    # Subclass ladders, derived from SUBCLASS_SPEC.
+    subclass_ladder_base = _subclass_case_ladder('_base_unit')
+    subclass_ladder_pref = _subclass_case_ladder('_preferred_unit_clean')
+
     # ---- multiplier clauses ----
     # Amount and time use the inverse-pattern builder (factor: canonical -> preferred).
     # Weight is now handled separately by the 9-case transition factor below,
@@ -156,12 +175,12 @@ def _convert_base_units_to_preferred_units(
     # the weight qualifier.
     amount_clause = _concat_builders_by_patterns(
         builder=_pattern_to_factor_builder_for_preferred,
-        patterns=[L_REGEX, MU_REGEX, MG_REGEX, NG_REGEX, G_REGEX],
+        patterns=AMOUNT_FACTOR_PATTERNS,
         else_case='1'
     )
     time_clause = _concat_builders_by_patterns(
         builder=_pattern_to_factor_builder_for_preferred,
-        patterns=[HR_REGEX],
+        patterns=TIME_FACTOR_PATTERNS,
         else_case='1'
     )
 
@@ -216,18 +235,14 @@ def _convert_base_units_to_preferred_units(
         SELECT l.*
             {classify_extra}
             , _unit_subclass: CASE
-                WHEN regexp_matches(_base_unit, '{MASS_REGEX}') THEN 'mass'
-                WHEN regexp_matches(_base_unit, '{VOLUME_REGEX}') THEN 'volume'
-                WHEN regexp_matches(_base_unit, '{UNIT_REGEX}') THEN 'unit'
+                {subclass_ladder_base}
                 ELSE 'unrecognized' END
             , _unit_class_preferred: CASE
                 WHEN _preferred_unit_clean IN ('{RATE_UNITS_STR}') THEN 'rate'
                 WHEN _preferred_unit_clean IN ('{AMOUNT_UNITS_STR}') THEN 'amount'
                 ELSE 'unrecognized' END
             , _unit_subclass_preferred: CASE
-                WHEN regexp_matches(_preferred_unit_clean, '{MASS_REGEX}') THEN 'mass'
-                WHEN regexp_matches(_preferred_unit_clean, '{VOLUME_REGEX}') THEN 'volume'
-                WHEN regexp_matches(_preferred_unit_clean, '{UNIT_REGEX}') THEN 'unit'
+                {subclass_ladder_pref}
                 ELSE 'unrecognized' END
             , _base_wt: {_weight_qual_clause('_base_unit')}
             , _pref_wt: {_weight_qual_clause('_preferred_unit_clean')}
@@ -272,7 +287,7 @@ def _convert_base_units_to_preferred_units(
             ELSE {dose_fallback}
             END
         , med_dose_unit_converted: CASE
-            WHEN _convert_status = 'success' THEN _preferred_unit
+            WHEN _convert_status = 'success' THEN {success_unit_expr}
             ELSE {unit_fallback}
             END
     FROM statused
@@ -285,7 +300,7 @@ def _convert_base_units_to_preferred_units(
             ELSE {dose_fallback}
             END
         , med_dose_unit_converted: CASE
-            WHEN _convert_status = 'success' THEN _preferred_unit
+            WHEN _convert_status = 'success' THEN {success_unit_expr}
             ELSE {unit_fallback}
             END
     FROM statused
