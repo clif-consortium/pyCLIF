@@ -52,21 +52,111 @@ UNIT_NAMING_VARIANTS = {
 }
 
 AMOUNT_ENDER = "($|/*)"
-MASS_REGEX = f"^(mcg|mg|ng|g){AMOUNT_ENDER}"
-VOLUME_REGEX = f"^(l|ml){AMOUNT_ENDER}"
-UNIT_REGEX = f"^(u|mu){AMOUNT_ENDER}"
+
+# ===========================================================================
+# Unit grammar
+# ===========================================================================
+# A dose unit is parsed on three independent axes:
+#
+#     amount  x  weight (/kg, /lb, none)  x  time (/min, /hr, /day)
+#
+# `SUBCLASS_SPEC` is the single source of truth for the amount axis. Every
+# regex, acceptable-unit set and SQL CASE ladder below is DERIVED from it, so
+# adding a unit family is a one-line change here rather than eight
+# hand-synchronised edits scattered through the SQL builders.
+#
+# `base` is the canonical token each family collapses to in stage 1. Families
+# never convert across subclass boundaries: mEq -> mg would need ion valence
+# and molar mass, which the medication tables do not carry, so the subclass
+# guard in `_convert_base_units_to_preferred_units` refuses it.
+SUBCLASS_SPEC = {
+    'mass':   {'tokens': ('mcg', 'mg', 'ng', 'g'), 'base': 'mcg'},
+    'volume': {'tokens': ('ml', 'l'),              'base': 'ml'},
+    'unit':   {'tokens': ('u', 'mu'),              'base': 'u'},
+}
+
+# Subclasses kept OUT of the weight x time cartesian product: a gas fraction
+# or a cell count has no meaningful `/kg` or `/min` form. They convert only to
+# themselves.
+STANDALONE_SUBCLASSES: frozenset = frozenset()
+
+# Multiplicative factor from each token to its subclass `base`. Values are SQL
+# expression strings, not numbers, because they are inlined into generated SQL.
+# Identity tokens (the bases themselves) are omitted and fall through to 1.
+TOKEN_TO_BASE_FACTOR = {
+    # volume -> ml
+    'l': '1000',
+    # unit -> u
+    'mu': '1/1000',       # milli-units
+    # mass -> mcg
+    'mg': '1000',
+    'ng': '1/1000',
+    'g': '1000000',
+}
+
+# Time axis. `/min` is the canonical base, so it is omitted (factor 1).
+TIME_TO_BASE_FACTOR = {
+    '/hr': '1/60',
+}
+
+ACCEPTABLE_WEIGHT_UNITS = ('/kg', '/lb', '')
+ACCEPTABLE_TIME_UNITS = tuple(['/min'] + sorted(TIME_TO_BASE_FACTOR))
+
+
+def _tokens_alternation(tokens) -> str:
+    """Build a regex alternation with the longest tokens first.
+
+    Regex alternation is leftmost-match, so `^(mg|mcg)` would match only `mg`
+    against the string "mcg". Sorting by descending length guarantees that a
+    longer token always wins over a shorter one that prefixes it.
+
+    Parameters
+    ----------
+    tokens : Iterable[str]
+        Unit tokens belonging to one subclass.
+
+    Returns
+    -------
+    str
+        Pipe-separated alternation, longest token first.
+
+    Examples
+    --------
+    >>> _tokens_alternation(('u', 'mu'))
+    'mu|u'
+    >>> _tokens_alternation(('mcg', 'mg', 'ng', 'g'))
+    'mcg|mg|ng|g'
+    """
+    return '|'.join(sorted(tokens, key=lambda t: (-len(t), t)))
+
+
+def _token_regex(token: str) -> str:
+    """Build the anchored amount regex for a single unit token."""
+    return f"^({token}){AMOUNT_ENDER}"
+
+
+# Per-subclass amount regexes, derived from SUBCLASS_SPEC.
+SUBCLASS_REGEX = {
+    name: f"^({_tokens_alternation(spec['tokens'])}){AMOUNT_ENDER}"
+    for name, spec in SUBCLASS_SPEC.items()
+}
+
+# Back-compat aliases: published in docs/api/utilities.md and imported by tests.
+MASS_REGEX = SUBCLASS_REGEX['mass']
+VOLUME_REGEX = SUBCLASS_REGEX['volume']
+UNIT_REGEX = SUBCLASS_REGEX['unit']
 
 # time
 HR_REGEX = f"/hr$"
 
 # mass
-MU_REGEX = f"^(mu){AMOUNT_ENDER}"
-MG_REGEX = f"^(mg){AMOUNT_ENDER}"
-NG_REGEX = f"^(ng){AMOUNT_ENDER}"
-G_REGEX = f"^(g){AMOUNT_ENDER}"
+MU_REGEX = _token_regex('mu')
+MG_REGEX = _token_regex('mg')
+NG_REGEX = _token_regex('ng')
+G_REGEX = _token_regex('g')
 
 # volume
-L_REGEX = f"^l{AMOUNT_ENDER}"
+L_REGEX = _token_regex('l')
 
 # weight
 # NOTE: trailing alternation `(/|$)` matches both rates (where the weight
@@ -77,20 +167,22 @@ LB_REGEX = f"/lb(/|$)"
 KG_REGEX = f"/kg(/|$)"
 WEIGHT_REGEX = f"/(lb|kg)(/|$)"
 
+# Ordered pattern lists consumed by the amount/time multiplier builders.
+# Longest token first, mirroring _tokens_alternation's rationale.
+AMOUNT_FACTOR_PATTERNS = [
+    _token_regex(t)
+    for t in sorted(TOKEN_TO_BASE_FACTOR, key=lambda t: (-len(t), t))
+]
+TIME_FACTOR_PATTERNS = [
+    f"{t}$" for t in sorted(TIME_TO_BASE_FACTOR, key=lambda t: (-len(t), t))
+]
+
 REGEX_TO_FACTOR_MAPPER = {
     # time -> /min
-    HR_REGEX: '1/60',
+    **{f"{t}$": f for t, f in TIME_TO_BASE_FACTOR.items()},
 
-    # volume -> ml
-    L_REGEX: '1000', # to ml
-
-    # unit -> u
-    MU_REGEX: '1/1000',
-
-    # mass -> mcg
-    MG_REGEX: '1000',
-    NG_REGEX: '1/1000',
-    G_REGEX: '1000000',
+    # amount -> subclass base (volume -> ml, unit -> u, mass -> mcg)
+    **{_token_regex(t): f for t, f in TOKEN_TO_BASE_FACTOR.items()},
 
     # weight (consumed only in stage 2 / preferred conversion under the
     # weight-aware redesign — kept here for reference; stage 1 ignores them)
