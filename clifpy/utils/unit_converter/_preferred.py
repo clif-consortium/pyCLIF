@@ -108,12 +108,25 @@ def _convert_base_units_to_preferred_units(
     # ---- preferred-unit acceptability validation via ANTI JOIN (no .to_df()) ----
     # Per docs/duckdb_perf_guide.md §7e and §1: ANTI JOIN keeps everything lazy
     # and only materializes the violations (typically empty) via .fetchall().
+    #
+    # NOTE: when the orchestrator supplies `_preferred_is_explicit`, only rows
+    # the caller actually requested are validated. Rows where the column is
+    # false carry a unit COALESCE'd from `_base_unit` -- clifpy's own derived
+    # value, not user input -- and an unconvertible one there is reported per
+    # row via `_convert_status` rather than aborting the call (clifpy#153).
+    # Called directly without that column, every row is validated as before.
+    explicit_filter = (
+        "AND _preferred_is_explicit"
+        if '_preferred_is_explicit' in med_df.columns
+        else ""
+    )
     acceptable_units_relation = pd.DataFrame({'unit': sorted(ALL_ACCEPTABLE_UNITS)})
     bad_units_rows = duckdb.sql(f"""
         SELECT DISTINCT _preferred_unit
         FROM med_df
         ANTI JOIN acceptable_units_relation ON _preferred_unit = unit
         WHERE _preferred_unit IS NOT NULL
+        {explicit_filter}
     """).fetchall()
     if bad_units_rows:
         bad_set = {row[0] for row in bad_units_rows}

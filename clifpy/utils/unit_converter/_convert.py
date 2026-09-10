@@ -219,6 +219,36 @@ def convert_dose_units_by_med_category(
                 else:
                     raise ValueError(error_msg)
 
+            # ----------------------------------------------------------
+            # Validate the units the CALLER actually asked for.
+            #
+            # NOTE: this deliberately runs before the fallback join below.
+            # Categories with no entry in `preferred_units` fall back to their
+            # own `_base_unit`, and if stage 1 could not map a drug's original
+            # unit that unmappable string carries through as its
+            # `_preferred_unit`. Validating post-fallback made one
+            # unconvertible drug abort a call that never mentioned it -- see
+            # clifpy#153, where asking for vasopressor units failed with
+            # `{'meq/min'}` because sodium bicarbonate happened to be in the
+            # same table. Fallback units are clifpy's own derived values, not
+            # user input, and their unconvertibility is already reported per
+            # row through `_convert_status`.
+            bad_by_category = {
+                category: unit
+                for category, unit in preferred_units.items()
+                if unit not in ALL_ACCEPTABLE_UNITS
+            }
+            if bad_by_category:
+                error_msg = (
+                    f"Cannot accommodate the conversion to the following preferred "
+                    f"units: {bad_by_category}. Consult the function documentation "
+                    f"for a list of acceptable units."
+                )
+                if override:
+                    logger.warning(error_msg)
+                else:
+                    raise ValueError(error_msg)
+
         # --------------------------------------------------------------
         # Stage 1: standardize to base units (no weight needed).
         # --------------------------------------------------------------
@@ -241,6 +271,11 @@ def convert_dose_units_by_med_category(
                 SELECT l.*
                     -- categories without an explicit preferred unit fall back to base
                     , _preferred_unit: COALESCE(r._preferred_unit, l._base_unit)
+                    -- Marks whether the caller actually requested this unit.
+                    -- Stage 2 validates only explicit rows; fallback units are
+                    -- derived by clifpy and are reported per row via
+                    -- `_convert_status` instead (clifpy#153).
+                    , _preferred_is_explicit: r._preferred_unit IS NOT NULL
                 FROM med_df_base l
                 LEFT JOIN preferred_units_df r USING (med_category)
             """)
@@ -375,6 +410,7 @@ def convert_dose_units_by_med_category(
             '_base_dose', '_base_unit',
             '_base_wt', '_pref_wt',
             '_preferred_unit',
+            '_preferred_is_explicit',
             '_unit_class_preferred',
             '_unit_subclass', '_unit_subclass_preferred',
             '_amount_multiplier', '_time_multiplier', '_weight_multiplier',
