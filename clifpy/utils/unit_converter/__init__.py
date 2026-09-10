@@ -81,10 +81,23 @@ from ._base import (
     standardize_dose_to_base_units,
 )
 from ._preferred import _convert_base_units_to_preferred_units
-from ._convert import convert_dose_units_by_med_category
+from ._convert import (
+    convert_dose_units_by_med_category,
+    standardize_med_dose_units,
+)
+from ._targets import (
+    load_dose_unit_targets,
+    register_target_reader,
+    available_target_formats,
+    TargetReader,
+)
 
 __all__ = [
     "convert_dose_units_by_med_category",
+    "standardize_med_dose_units",
+    "load_dose_unit_targets",
+    "register_target_reader",
+    "available_target_formats",
     "standardize_dose_to_base_units",
     "find_most_recent_weight",
     "ALL_ACCEPTABLE_UNITS",

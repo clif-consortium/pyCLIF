@@ -1312,6 +1312,146 @@ class ClifOrchestrator:
             self.logger.info("Returning converted data without updating table")
             return converted_df, counts_df
 
+    def standardize_dose_units_for_continuous_meds(
+        self,
+        target_schema,
+        vitals_df: pd.DataFrame = None,
+        hospitalization_ids: Optional[List[str]] = None,
+        show_intermediate: bool = False,
+        override: bool = True,
+        save_to_table: bool = True,
+        **kwargs
+    ) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]:
+        """
+        Standardize continuous medication dose units against an external schema.
+
+        Same as :meth:`convert_dose_units_for_continuous_meds`, but the target
+        unit for each ``med_category`` is read from a CLIF mCIDE schema file
+        rather than supplied inline.
+
+        Parameters
+        ----------
+        target_schema : str, Path, or dict
+            Schema file path/URL, or an already-parsed
+            ``{med_category: target_unit}`` mapping. Schemas are always supplied
+            externally rather than vendored into clifpy, because they change
+            independently of the library.
+        vitals_df : pd.DataFrame, optional
+            Vitals DataFrame for extracting patient weights.
+        hospitalization_ids : List[str], optional
+            Restrict loading and processing to these hospitalizations.
+        show_intermediate : bool, default=False
+            If True, includes intermediate calculation columns in output.
+        override : bool, default=True
+            Note this differs from :meth:`convert_dose_units_for_continuous_meds`.
+            A schema covering a few hundred categories will always list some the
+            data does not contain, which must warn rather than abort.
+        save_to_table : bool, default=True
+            If True, saves to the table's ``df_converted`` / ``conversion_counts``
+            properties instead of returning.
+        **kwargs
+            Forwarded to
+            :func:`~clifpy.utils.unit_converter.standardize_med_dose_units`
+            (``schema_unit_col``, ``reader``, ``countable_units``, ...).
+
+        Returns
+        -------
+        tuple or None
+            ``(converted, counts)`` when ``save_to_table`` is False.
+
+        Examples
+        --------
+        >>> URL = (                                        # doctest: +SKIP
+        ...     'https://raw.githubusercontent.com/'
+        ...     'Common-Longitudinal-ICU-data-Format/CLIF/3.0/mCIDE/'
+        ...     'medication_admin_continuous/'
+        ...     'clif_medication_admin_continuous_med_categories.csv')
+        >>> co.standardize_dose_units_for_continuous_meds(URL)   # doctest: +SKIP
+        """
+        return self._standardize_dose_units(
+            table_name='medication_admin_continuous',
+            target_schema=target_schema,
+            vitals_df=vitals_df,
+            hospitalization_ids=hospitalization_ids,
+            show_intermediate=show_intermediate,
+            override=override,
+            save_to_table=save_to_table,
+            **kwargs
+        )
+
+    def standardize_dose_units_for_intermittent_meds(
+        self,
+        target_schema,
+        vitals_df: pd.DataFrame = None,
+        hospitalization_ids: Optional[List[str]] = None,
+        show_intermediate: bool = False,
+        override: bool = True,
+        save_to_table: bool = True,
+        **kwargs
+    ) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]:
+        """
+        Standardize intermittent medication dose units against an external schema.
+
+        See :meth:`standardize_dose_units_for_continuous_meds` for parameters.
+        """
+        return self._standardize_dose_units(
+            table_name='medication_admin_intermittent',
+            target_schema=target_schema,
+            vitals_df=vitals_df,
+            hospitalization_ids=hospitalization_ids,
+            show_intermediate=show_intermediate,
+            override=override,
+            save_to_table=save_to_table,
+            **kwargs
+        )
+
+    def _standardize_dose_units(
+        self,
+        table_name: str,
+        target_schema,
+        vitals_df: pd.DataFrame = None,
+        hospitalization_ids: Optional[List[str]] = None,
+        show_intermediate: bool = False,
+        override: bool = True,
+        save_to_table: bool = True,
+        **kwargs
+    ) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]:
+        """Shared body for the two standardize_dose_units_for_*_meds methods."""
+        from .utils.unit_converter import standardize_med_dose_units
+
+        med_filters = {'hospitalization_id': hospitalization_ids} if hospitalization_ids else None
+        if getattr(self, table_name, None) is None:
+            self.logger.info(f"Loading {table_name} table")
+            self.load_table(table_name, filters=med_filters)
+        table = getattr(self, table_name)
+
+        if vitals_df is None:
+            self.logger.info("Loading vitals table for patient weights")
+            vitals_filters = {'vital_category': ['weight_kg']}
+            if hospitalization_ids:
+                vitals_filters['hospitalization_id'] = hospitalization_ids
+            if self.vitals is None:
+                self.load_table('vitals', filters=vitals_filters)
+            vitals_df = self.vitals.df
+
+        self.logger.info(f"Standardizing {table_name} dose units against schema")
+        converted_df, counts_df = standardize_med_dose_units(
+            table.df,
+            target_schema,
+            vitals_df=vitals_df,
+            show_intermediate=show_intermediate,
+            override=override,
+            **kwargs
+        )
+        self.logger.info("Dose unit standardization completed")
+
+        if save_to_table:
+            self.logger.info(f"Updating {table_name} table with standardized data")
+            table.df_converted = converted_df
+            table.conversion_counts = counts_df
+            return None
+        return converted_df, counts_df
+
     def compute_sofa_scores(
         self,
         wide_df: Optional[pd.DataFrame] = None,

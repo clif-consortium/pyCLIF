@@ -6,7 +6,8 @@ temp-table lifecycle, and preserves timezone metadata across the pipeline.
 
 import pandas as pd
 import duckdb
-from typing import Tuple, List, Union, Literal, Collection, overload
+from pathlib import Path
+from typing import Tuple, List, Dict, Union, Literal, Collection, overload
 from duckdb import DuckDBPyRelation
 
 from clifpy.utils.logging_config import get_logger
@@ -27,6 +28,7 @@ from ._base import standardize_dose_to_base_units
 from ._weight import find_most_recent_weight
 from ._preferred import _convert_base_units_to_preferred_units
 from ._counts import _create_unit_conversion_counts_table
+from ._targets import load_dose_unit_targets
 
 logger = get_logger('utils.unit_converter')
 
@@ -261,10 +263,16 @@ def convert_dose_units_by_med_category(
                   ON requested_categories_df.med_category = existing.med_category
             """).fetchall()
             if extra_rows:
-                extras = {row[0] for row in extra_rows}
+                extras = sorted(row[0] for row in extra_rows)
+                # Standardizing against a schema of a few hundred categories
+                # will always list many the data does not contain, so summarise
+                # rather than dumping every name into the log.
+                shown = ', '.join(extras[:8])
+                if len(extras) > 8:
+                    shown += f", ... (+{len(extras) - 8} more)"
                 error_msg = (
-                    f"The following med_categories are given a preferred unit but not "
-                    f"found in the input med_df: {extras}"
+                    f"{len(extras)} med_category value(s) are given a preferred unit "
+                    f"but not found in the input med_df: {shown}"
                 )
                 if override:
                     logger.warning(error_msg)
@@ -512,3 +520,107 @@ def convert_dose_units_by_med_category(
         # still references the relation lazily).
         if materialized_input:
             _cleanup_temp_tables()
+
+
+def standardize_med_dose_units(
+    med_df: pd.DataFrame | DuckDBPyRelation,
+    target_schema: Union[str, Path, Dict[str, str]],
+    *,
+    vitals_df: pd.DataFrame | DuckDBPyRelation = None,
+    reader=None,
+    category_col: str = 'med_category',
+    unit_col: str = 'med_dose_unit',
+    schema_category_col: str = 'med_category',
+    schema_unit_col: str = 'med_dose_unit',
+    override: bool = True,
+    **kwargs,
+) -> Union[Tuple[pd.DataFrame, pd.DataFrame], Tuple[DuckDBPyRelation, DuckDBPyRelation]]:
+    """Standardize a medication table against an external mCIDE schema.
+
+    Convenience wrapper over :func:`convert_dose_units_by_med_category` that
+    takes the per-category target units from a schema file instead of an
+    inline dict.
+
+    Parameters
+    ----------
+    med_df : pd.DataFrame or DuckDBPyRelation
+        Medication administration table.
+    target_schema : str, Path, or dict
+        Schema file path/URL, or an already-parsed
+        ``{med_category: target_unit}`` mapping.
+    vitals_df : pd.DataFrame or DuckDBPyRelation, optional
+        Vitals table, needed only when a conversion crosses the weight axis
+        (weighted to unweighted or the reverse).
+    reader : callable, optional
+        Override the schema reader; see
+        :func:`~clifpy.utils.unit_converter.load_dose_unit_targets`.
+    category_col, unit_col : str
+        Column names in `med_df`. Forwarded to the converter.
+    schema_category_col, schema_unit_col : str
+        Column names in the *schema file*. Kept separate from `category_col` /
+        `unit_col` because the schema and the data are different artefacts and
+        need not agree; pass `schema_unit_col='volume_infusion_rate_units'` to
+        read the volume targets from the same file.
+    override : bool, default True
+        Note this default differs from
+        :func:`convert_dose_units_by_med_category`, which defaults to False.
+        Standardizing a whole table against a schema covering a few hundred
+        categories will always meet categories the schema does not list, and
+        that must warn rather than abort. clifpy#153 is what makes this safe
+        rather than a blunt instrument: only units the caller actually supplied
+        are validated, so unlisted categories simply keep their base units and
+        are reported per row in `_convert_status`.
+    **kwargs
+        Passed through to :func:`convert_dose_units_by_med_category`
+        (`id_name`, `return_rel`, `show_intermediate`, `countable_units`,
+        `converted_dose_col`, ...).
+
+    Returns
+    -------
+    tuple
+        `(converted, counts)`, as
+        :func:`convert_dose_units_by_med_category` returns.
+
+    Examples
+    --------
+    >>> from clifpy.utils.unit_converter import standardize_med_dose_units
+    >>> URL = (                                        # doctest: +SKIP
+    ...     'https://raw.githubusercontent.com/'
+    ...     'Common-Longitudinal-ICU-data-Format/CLIF/3.0/mCIDE/'
+    ...     'medication_admin_continuous/'
+    ...     'clif_medication_admin_continuous_med_categories.csv')
+    >>> out, counts = standardize_med_dose_units(      # doctest: +SKIP
+    ...     mac_df, URL, vitals_df=vitals_df)
+
+    See Also
+    --------
+    convert_dose_units_by_med_category : The underlying conversion.
+    clifpy.utils.unit_converter.load_dose_unit_targets : Schema parsing.
+    """
+    if isinstance(target_schema, dict):
+        targets = dict(target_schema)
+    else:
+        targets = load_dose_unit_targets(
+            target_schema,
+            reader=reader,
+            category_col=schema_category_col,
+            unit_col=schema_unit_col,
+        )
+    if not targets:
+        raise ValueError(
+            "target schema produced no usable targets; check the schema "
+            "columns and that the file is not empty"
+        )
+
+    logger.info(
+        "Standardizing med dose units against %d schema target(s)", len(targets)
+    )
+    return convert_dose_units_by_med_category(
+        med_df,
+        vitals_df=vitals_df,
+        preferred_units=targets,
+        override=override,
+        category_col=category_col,
+        unit_col=unit_col,
+        **kwargs,
+    )
