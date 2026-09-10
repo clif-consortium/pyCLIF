@@ -17,6 +17,10 @@ here, so `from clifpy.utils.unit_converter import ...` is unchanged.
 from ._grammar import (
     KG_PER_LB,
     UNIT_NAMING_VARIANTS,
+    CANONICAL_UNIT_SPELLING,
+    DEFAULT_COUNTABLE_UNITS,
+    MISSING_UNIT_PLACEHOLDERS,
+    STANDALONE_AMOUNT_UNITS,
     SUBCLASS_SPEC,
     SUBCLASS_REGEX,
     STANDALONE_SUBCLASSES,
@@ -65,6 +69,12 @@ from ._sql import (
     _pattern_to_factor_builder_for_preferred,
 )
 from ._counts import _create_unit_conversion_counts_table
+from ._columns import (
+    validate_column_name,
+    build_rename_map,
+    rename_to_internal,
+    rename_from_internal,
+)
 from ._weight import find_most_recent_weight
 from ._base import (
     _convert_clean_units_to_base_units,

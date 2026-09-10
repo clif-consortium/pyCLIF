@@ -17,6 +17,12 @@ from clifpy.utils._duckdb_helpers import (
 
 from ._grammar import ALL_ACCEPTABLE_UNITS, _weight_qual_clause
 from ._clean import _clean_dose_unit_formats_duckdb, _clean_dose_unit_names_duckdb
+from ._columns import (
+    build_rename_map,
+    rename_to_internal,
+    rename_from_internal,
+    validate_column_name,
+)
 from ._base import standardize_dose_to_base_units
 from ._weight import find_most_recent_weight
 from ._preferred import _convert_base_units_to_preferred_units
@@ -106,6 +112,12 @@ def convert_dose_units_by_med_category(
     id_name: str = 'hospitalization_id',
     fallback_on_earliest: bool = False,
     countable_units: Collection[str] | None = None,
+    category_col: str = 'med_category',
+    dose_col: str = 'med_dose',
+    unit_col: str = 'med_dose_unit',
+    time_col: str = 'admin_dttm',
+    converted_dose_col: str = 'med_dose_converted',
+    converted_unit_col: str = 'med_dose_unit_converted',
 ) -> Union[Tuple[pd.DataFrame, pd.DataFrame], Tuple[DuckDBPyRelation, DuckDBPyRelation]]:
     """Convert medication dose units to preferred units, weight-aware and DuckDB-native.
 
@@ -195,6 +207,15 @@ def convert_dose_units_by_med_category(
         _register_temp_table("_med_unit_input")
         med_df = duckdb.table("_med_unit_input")
         materialized_input = True
+
+    # Project the caller's columns onto the names the pipeline's SQL is written
+    # against. Everything downstream then works on fixed literal names, so no
+    # caller-supplied identifier ever reaches an internal f-string. Validation
+    # and quoting happen inside these two helpers. See _columns.py.
+    rename_map = build_rename_map(category_col, dose_col, unit_col, time_col)
+    validate_column_name(converted_dose_col, 'converted_dose_col')
+    validate_column_name(converted_unit_col, 'converted_unit_col')
+    med_df = rename_to_internal(med_df, rename_map)
 
     try:
         # --------------------------------------------------------------
@@ -425,6 +446,13 @@ def convert_dose_units_by_med_category(
             raise ValueError(f"Error creating unit conversion counts table: {e}")
 
         logger.info("Dose unit conversion complete")
+
+        # Restore the caller's column names and apply the requested output
+        # names. The counts table keeps the internal names: it is a QA summary
+        # keyed on clifpy's own vocabulary, not a projection of the input.
+        med_df_converted = rename_from_internal(
+            med_df_converted, rename_map, converted_dose_col, converted_unit_col
+        )
 
         # --------------------------------------------------------------
         # Output column hygiene + final return.
