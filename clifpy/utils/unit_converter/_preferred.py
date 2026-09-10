@@ -105,6 +105,16 @@ def _convert_base_units_to_preferred_units(
     if missing_columns:
         raise ValueError(f"The following column(s) are required but not found: {missing_columns}")
 
+    # `_preferred_unit_clean` is the normalised form every regex below matches
+    # against; the orchestrator supplies it. When this function is called
+    # directly with an already-canonical `_preferred_unit`, alias the two so
+    # the rest of the query needs no conditional.
+    if '_preferred_unit_clean' not in med_df.columns:
+        med_df = duckdb.sql("""
+            SELECT *, _preferred_unit AS _preferred_unit_clean
+            FROM med_df
+        """)
+
     # ---- preferred-unit acceptability validation via ANTI JOIN (no .to_df()) ----
     # Per docs/duckdb_perf_guide.md §7e and §1: ANTI JOIN keeps everything lazy
     # and only materializes the violations (typically empty) via .fetchall().
@@ -124,8 +134,8 @@ def _convert_base_units_to_preferred_units(
     bad_units_rows = duckdb.sql(f"""
         SELECT DISTINCT _preferred_unit
         FROM med_df
-        ANTI JOIN acceptable_units_relation ON _preferred_unit = unit
-        WHERE _preferred_unit IS NOT NULL
+        ANTI JOIN acceptable_units_relation ON _preferred_unit_clean = unit
+        WHERE _preferred_unit_clean IS NOT NULL
         {explicit_filter}
     """).fetchall()
     if bad_units_rows:
@@ -183,7 +193,7 @@ def _convert_base_units_to_preferred_units(
     # Identity short-circuit: only meaningful when both _clean_unit and med_dose
     # are available. Returns med_dose bit-exact (no multiplication).
     identity_dose_branch = (
-        f"WHEN _convert_status = 'success' AND _clean_unit = _preferred_unit THEN {dose_fallback}\n            "
+        f"WHEN _convert_status = 'success' AND _clean_unit = _preferred_unit_clean THEN {dose_fallback}\n            "
         if has_clean_unit and has_med_dose else ""
     )
 
@@ -211,16 +221,16 @@ def _convert_base_units_to_preferred_units(
                 WHEN regexp_matches(_base_unit, '{UNIT_REGEX}') THEN 'unit'
                 ELSE 'unrecognized' END
             , _unit_class_preferred: CASE
-                WHEN _preferred_unit IN ('{RATE_UNITS_STR}') THEN 'rate'
-                WHEN _preferred_unit IN ('{AMOUNT_UNITS_STR}') THEN 'amount'
+                WHEN _preferred_unit_clean IN ('{RATE_UNITS_STR}') THEN 'rate'
+                WHEN _preferred_unit_clean IN ('{AMOUNT_UNITS_STR}') THEN 'amount'
                 ELSE 'unrecognized' END
             , _unit_subclass_preferred: CASE
-                WHEN regexp_matches(_preferred_unit, '{MASS_REGEX}') THEN 'mass'
-                WHEN regexp_matches(_preferred_unit, '{VOLUME_REGEX}') THEN 'volume'
-                WHEN regexp_matches(_preferred_unit, '{UNIT_REGEX}') THEN 'unit'
+                WHEN regexp_matches(_preferred_unit_clean, '{MASS_REGEX}') THEN 'mass'
+                WHEN regexp_matches(_preferred_unit_clean, '{VOLUME_REGEX}') THEN 'volume'
+                WHEN regexp_matches(_preferred_unit_clean, '{UNIT_REGEX}') THEN 'unit'
                 ELSE 'unrecognized' END
             , _base_wt: {_weight_qual_clause('_base_unit')}
-            , _pref_wt: {_weight_qual_clause('_preferred_unit')}
+            , _pref_wt: {_weight_qual_clause('_preferred_unit_clean')}
         FROM med_df l
     )
     , statused AS (

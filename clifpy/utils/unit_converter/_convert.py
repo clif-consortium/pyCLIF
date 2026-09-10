@@ -16,6 +16,7 @@ from clifpy.utils._duckdb_helpers import (
 )
 
 from ._grammar import ALL_ACCEPTABLE_UNITS, _weight_qual_clause
+from ._clean import _clean_dose_unit_formats_duckdb, _clean_dose_unit_names_duckdb
 from ._base import standardize_dose_to_base_units
 from ._weight import find_most_recent_weight
 from ._preferred import _convert_base_units_to_preferred_units
@@ -198,6 +199,35 @@ def convert_dose_units_by_med_category(
         # --------------------------------------------------------------
         # Validate requested med_categories via ANTI JOIN (no .to_df()).
         # --------------------------------------------------------------
+        # Lookup table carrying BOTH the caller's spelling and its normalised
+        # form. Built once, off the (small) preferred_units dict rather than
+        # the med table.
+        #
+        # WARNING: `_preferred_unit_clean` is not cosmetic. Stage 2 matches the
+        # preferred unit against the factor regexes, and the caller's raw
+        # string does not necessarily match them. mCIDE spells pitocin's target
+        # `milli-units/min`, which fails `MU_REGEX = ^(mu)` because it starts
+        # "mi" -- the multiplier would fall through to 1 and the dose come out
+        # 1000x wrong. `units/kg/hr` only survives by accident, since `^(u)`
+        # matches the leading "u" of "units". `_preferred_unit` keeps the
+        # caller's spelling for output; `_preferred_unit_clean` drives every
+        # regex match and the acceptability check below.
+        preferred_units_df = pd.DataFrame(
+            preferred_units.items() if preferred_units else [],
+            columns=['med_category', '_preferred_unit'],
+        )
+        if len(preferred_units_df):
+            _pref_rel = _clean_dose_unit_formats_duckdb(
+                preferred_units_df, col='_preferred_unit',
+                out_col='_preferred_unit_clean',
+            )
+            _pref_rel = _clean_dose_unit_names_duckdb(
+                _pref_rel, col='_preferred_unit_clean',
+            )
+            preferred_units_df = _pref_rel.to_df()
+        else:
+            preferred_units_df['_preferred_unit_clean'] = pd.Series(dtype='object')
+
         if preferred_units:
             requested_categories_df = pd.DataFrame(
                 {'med_category': sorted(preferred_units.keys())}
@@ -233,10 +263,16 @@ def convert_dose_units_by_med_category(
             # same table. Fallback units are clifpy's own derived values, not
             # user input, and their unconvertibility is already reported per
             # row through `_convert_status`.
+            # NOTE: iterate with zip, not itertuples -- pandas renames
+            # leading-underscore columns to positional _1/_2 there.
             bad_by_category = {
-                category: unit
-                for category, unit in preferred_units.items()
-                if unit not in ALL_ACCEPTABLE_UNITS
+                category: raw
+                for category, raw, clean in zip(
+                    preferred_units_df['med_category'],
+                    preferred_units_df['_preferred_unit'],
+                    preferred_units_df['_preferred_unit_clean'],
+                )
+                if clean not in ALL_ACCEPTABLE_UNITS
             }
             if bad_by_category:
                 error_msg = (
@@ -263,10 +299,6 @@ def convert_dose_units_by_med_category(
         # Join preferred units onto base table.
         # --------------------------------------------------------------
         try:
-            preferred_units_df = pd.DataFrame(
-                preferred_units.items() if preferred_units else [],
-                columns=['med_category', '_preferred_unit']
-            )
             med_df_preferred = duckdb.sql("""
                 SELECT l.*
                     -- categories without an explicit preferred unit fall back to base
@@ -276,6 +308,10 @@ def convert_dose_units_by_med_category(
                     -- derived by clifpy and are reported per row via
                     -- `_convert_status` instead (clifpy#153).
                     , _preferred_is_explicit: r._preferred_unit IS NOT NULL
+                    -- `_base_unit` is already canonical, so the fallback needs
+                    -- no further normalisation.
+                    , _preferred_unit_clean: COALESCE(
+                        r._preferred_unit_clean, l._base_unit)
                 FROM med_df_base l
                 LEFT JOIN preferred_units_df r USING (med_category)
             """)
@@ -410,6 +446,7 @@ def convert_dose_units_by_med_category(
             '_base_dose', '_base_unit',
             '_base_wt', '_pref_wt',
             '_preferred_unit',
+            '_preferred_unit_clean',
             '_preferred_is_explicit',
             '_unit_class_preferred',
             '_unit_subclass', '_unit_subclass_preferred',

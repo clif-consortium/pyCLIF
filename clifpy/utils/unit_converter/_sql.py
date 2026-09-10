@@ -91,7 +91,7 @@ def _pattern_to_factor_builder_for_preferred(pattern: str) -> str:
     Parameters
     ----------
     pattern : str
-        Regex pattern to match in _preferred_unit column.
+        Regex pattern to match in the _preferred_unit_clean column.
         Must exist in REGEX_TO_FACTOR_MAPPER dictionary.
 
     Returns
@@ -107,7 +107,7 @@ def _pattern_to_factor_builder_for_preferred(pattern: str) -> str:
     Examples
     --------
     >>> clause = _pattern_to_factor_builder_for_preferred('/hr$')
-    >>> 'WHEN regexp_matches(_preferred_unit' in clause and 'THEN 1/' in clause
+    >>> 'WHEN regexp_matches(_preferred_unit_clean' in clause and 'THEN 1/' in clause
     True
 
     Notes
@@ -121,6 +121,10 @@ def _pattern_to_factor_builder_for_preferred(pattern: str) -> str:
     _pattern_to_factor_builder_for_base : Builds patterns for base unit conversion
     """
     if pattern in REGEX_TO_FACTOR_MAPPER:
-        return f"WHEN regexp_matches(_preferred_unit, '{pattern}') THEN 1/({REGEX_TO_FACTOR_MAPPER.get(pattern)})"
+        # NOTE: matches against `_preferred_unit_clean`, the normalised form,
+        # not the caller's raw `_preferred_unit`. A raw string like
+        # `milli-units/min` does not match `^(mu)` and would silently take the
+        # else branch (factor 1), giving a 1000x error reported as 'success'.
+        return f"WHEN regexp_matches(_preferred_unit_clean, '{pattern}') THEN 1/({REGEX_TO_FACTOR_MAPPER.get(pattern)})"
     raise ValueError(f"regex pattern {pattern} not found in REGEX_TO_FACTOR_MAPPER dict")
 

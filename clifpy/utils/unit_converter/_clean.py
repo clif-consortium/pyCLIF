@@ -47,7 +47,8 @@ def _clean_dose_unit_formats(s: pd.Series) -> pd.Series:
 
 def _clean_dose_unit_formats_duckdb(
     relation: pd.DataFrame | duckdb.DuckDBPyRelation,
-    col: str = 'med_dose_unit'
+    col: str = 'med_dose_unit',
+    out_col: str = '_clean_unit'
 ) -> duckdb.DuckDBPyRelation:
     """Clean dose unit formatting using DuckDB to avoid pandas materialization.
 
@@ -59,11 +60,15 @@ def _clean_dose_unit_formats_duckdb(
         Input data containing the column to clean.
     col : str, default 'med_dose_unit'
         Name of the column containing dose unit strings.
+    out_col : str, default '_clean_unit'
+        Name of the column to write the cleaned value into. Parameterised so
+        the same chain can normalise the caller's preferred units into
+        `_preferred_unit_clean` without clobbering the observed `_clean_unit`.
 
     Returns
     -------
     duckdb.DuckDBPyRelation
-        Relation with new '_clean_unit' column added.
+        Relation with the `out_col` column added.
 
     Examples
     --------
@@ -75,7 +80,7 @@ def _clean_dose_unit_formats_duckdb(
     """
     return duckdb.sql(f"""
         SELECT *,
-            NULLIF(lower(regexp_replace({col}, '\\s+', '', 'g')), '') as _clean_unit
+            NULLIF(lower(regexp_replace({col}, '\\s+', '', 'g')), '') as {out_col}
         FROM relation
     """)
     
