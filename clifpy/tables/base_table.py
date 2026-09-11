@@ -640,7 +640,7 @@ class BaseTable:
                 f'summary_{self.table_name}.json'
             )
             
-            with open(summary_file, 'w') as f:
+            with open(summary_file, 'w', encoding='utf-8') as f:
                 json.dump(summary, f, indent=2, default=str)
             
             self.logger.info(f"Saved summary to {summary_file}")

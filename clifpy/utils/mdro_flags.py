@@ -315,7 +315,7 @@ def _load_mdro_config(config_path: Optional[str] = None) -> Dict[str, Any]:
             f"MDRO configuration file not found: {config_path}"
         )
 
-    with open(config_path, 'r') as f:
+    with open(config_path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
 
     return config

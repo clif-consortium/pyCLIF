@@ -44,7 +44,7 @@ def _load_config_file(config_path: str) -> Dict[str, Any]:
     file_ext = Path(config_path).suffix.lower()
 
     try:
-        with open(config_path, 'r') as f:
+        with open(config_path, 'r', encoding='utf-8') as f:
             if file_ext == '.json':
                 config = json.load(f)
             elif file_ext in ['.yaml', '.yml']:
@@ -301,7 +301,7 @@ def create_example_config(
             "clif_version": DEFAULT_CLIF_VERSION
         }
 
-        with open(config_path, 'w') as f:
+        with open(config_path, 'w', encoding='utf-8') as f:
             yaml.dump(config, f, default_flow_style=False, indent=2)
     else:
         # Use JSON field names for JSON format
@@ -313,7 +313,7 @@ def create_example_config(
             "clif_version": DEFAULT_CLIF_VERSION
         }
 
-        with open(config_path, 'w') as f:
+        with open(config_path, 'w', encoding='utf-8') as f:
             json.dump(config, f, indent=2)
 
     logger.info(f"Example {format.upper()} configuration file created at: {config_path}")

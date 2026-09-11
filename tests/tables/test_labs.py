@@ -265,5 +265,20 @@ def test_get_lab_specimen_stats_empty_data():
     """Test lab specimen statistics with empty data."""
     labs_obj = Labs()
     stats = labs_obj.get_lab_specimen_stats()
-    
+
     assert stats == {"status": "Missing columns"}
+
+def test_standardize_reference_units_keeps_each_unit_of_multi_unit_lab():
+    """Urine albumin in mg/dL must stay mg/dl, not be relabelled g/dl."""
+    data = pd.DataFrame({
+        'hospitalization_id': ['H001', 'H002'],
+        'lab_category': ['albumin', 'albumin'],
+        'reference_unit': ['g/dL', 'mg/dL'],
+        'lab_specimen_category': ['plasma_blood', 'urine'],
+    })
+    labs_obj = Labs(data=data)
+    labs_obj.standardize_reference_units(lowercase=True)
+
+    out = labs_obj.data
+    units = dict(zip(out['lab_specimen_category'].to_list(), out['reference_unit'].to_list()))
+    assert units == {'plasma_blood': 'g/dl', 'urine': 'mg/dl'}

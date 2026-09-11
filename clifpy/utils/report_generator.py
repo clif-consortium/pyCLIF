@@ -943,7 +943,7 @@ def generate_text_report(validation_data: Dict[str, Any],
     lines.append("END OF REPORT")
     lines.append("=" * 120)
 
-    with open(output_path, 'w') as f:
+    with open(output_path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(lines))
 
     return output_path

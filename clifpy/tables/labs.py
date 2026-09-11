@@ -106,26 +106,27 @@ class Labs(BaseTable):
         """
         return self._lab_reference_units.copy() if self._lab_reference_units else {}
 
-    def _resolve_target_units(self, entry) -> tuple:
-        """Return ``(preferred_canonical, accepted_spellings)`` for one
-        ``lab_reference_units`` entry.
+    def _resolve_target_groups(self, entry) -> list:
+        """Return ``[(preferred_canonical, accepted_spellings), ...]`` for one
+        ``lab_reference_units`` entry, one group per reference unit.
 
-        Handles both the canonical-key-string format and the legacy list
-        format. For canonical strings, the accepted list is expanded via
-        ``allowed_unit_variants`` (always with the canonical itself first).
+        ``entry`` is a canonical unit key, or a list of them for analytes CLIF
+        reports in more than one unit (albumin is g/dl in blood, mg/dl in
+        urine). Each key is expanded via ``allowed_unit_variants`` (always with
+        the canonical itself first). A list in a schema without that map is the
+        legacy format: pre-expanded spellings of one unit, preferring the first.
         """
         if isinstance(entry, str):
-            canonical = entry
-            key = canonical.lower().strip()
-            variants = self._allowed_unit_variants.get(key)
-            if variants:
-                accepted = list(dict.fromkeys([canonical, *variants]))
-            else:
-                accepted = [canonical]
-            return canonical, accepted
-        if isinstance(entry, (list, tuple)) and entry:
-            return entry[0], list(entry)
-        return '', []
+            entry = [entry]
+        if not isinstance(entry, (list, tuple)) or not entry:
+            return []
+        if not self._allowed_unit_variants:
+            return [(entry[0], list(entry))]
+        groups = []
+        for canonical in entry:
+            variants = self._allowed_unit_variants.get(canonical.lower().strip()) or []
+            groups.append((canonical, list(dict.fromkeys([canonical, *variants]))))
+        return groups
 
     def _validate_required_columns(self, required: set) -> set:
         """Check for required columns, return set of missing columns."""
@@ -323,14 +324,19 @@ class Labs(BaseTable):
             if pd.isna(source_unit):
                 continue
 
-            entry = self._lab_reference_units.get(lab_cat)
-            canonical, target_units = self._resolve_target_units(entry)
-            if not target_units:
+            groups = self._resolve_target_groups(self._lab_reference_units.get(lab_cat))
+            if not groups:
                 continue
 
-            matched_target = self._find_matching_target_unit(
-                source_unit, target_units, preferred=canonical,
-            )
+            # Relabel to the unit whose spellings matched, so a urine albumin
+            # in mg/dL becomes mg/dl rather than being relabelled g/dl.
+            matched_target = None
+            for canonical, accepted in groups:
+                matched_target = self._find_matching_target_unit(
+                    source_unit, accepted, preferred=canonical,
+                )
+                if matched_target:
+                    break
 
             if matched_target:
                 final_target = matched_target.lower() if lowercase else matched_target
@@ -357,7 +363,7 @@ class Labs(BaseTable):
                 unmatched_units.append({
                     'lab_category': lab_cat,
                     'source_unit': source_unit,
-                    'expected_units': target_units
+                    'expected_units': [u for _, accepted in groups for u in accepted]
                 })
 
         # Batch log all mappings at once

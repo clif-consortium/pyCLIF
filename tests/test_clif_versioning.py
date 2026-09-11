@@ -188,8 +188,17 @@ def test_30_lab_reference_units_consistent():
     units = s["lab_reference_units"]
     cats = next(c for c in s["columns"] if c["name"] == "lab_category")["permissible_values"]
     assert set(units) == set(cats)
-    missing = {cat: u for cat, u in units.items() if u not in s["allowed_unit_variants"]}
+    missing = {
+        cat: u
+        for cat, entry in units.items()
+        for u in ([entry] if isinstance(entry, str) else entry)
+        if u not in s["allowed_unit_variants"]
+    }
     assert not missing, missing
+    # mCIDE lists these analytes once per unit, split by specimen.
+    assert units["albumin"] == units["protein"] == ["g/dl", "mg/dl"]
+    for cat in ("wbc", "eosinophils_absolute", "lymphocytes_absolute", "neutrophils_absolute"):
+        assert units[cat] == ["10^3/ul", "cells/ul"], cat
 
 
 def test_all_30_tables_registered():

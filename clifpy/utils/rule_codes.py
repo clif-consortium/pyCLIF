@@ -209,18 +209,26 @@ def build_finding(message: str, details: Dict[str, Any]) -> str:
         suffix = f" ... ({len(missing_cols)} total)" if len(missing_cols) > 5 else ""
         parts.append(f"Missing: {cols}{suffix}")
 
-    # Lab reference: top invalid units
+    # Lab reference: expected vs observed units. The lab_category is already
+    # named in the message, so only the units are listed here.
     top_units = details.get('top_invalid_units')
     if top_units and isinstance(top_units, list):
         items = []
         for it in top_units[:5]:
             if isinstance(it, dict):
-                cat = it.get('lab_category', it.get('category', '?'))
-                unit = it.get('unit', it.get('reference_unit', '?'))
-                items.append(f"{cat}: '{unit}'")
+                unit = it.get('reference_unit', it.get('unit', '?'))
+                count = it.get('count')
+                if count is not None:
+                    items.append(f"'{unit}' ({count:,} rows)")
+                else:
+                    items.append(f"'{unit}'")
             else:
                 items.append(str(it))
-        parts.append(f"Units: {', '.join(items)}")
+        suffix = f" ... ({len(top_units)} distinct)" if len(top_units) > 5 else ""
+        expected = [u for u in (details.get('canonical_units') or [details.get('canonical_unit')]) if u]
+        expected_str = ' or '.join(f"'{u}'" for u in expected)
+        prefix = f"Expected {expected_str}; found" if expected else "Found"
+        parts.append(f"{prefix} {', '.join(items)}{suffix}")
 
     # Medication dose units: expected vs observed units
     top_med_units = details.get('top_mismatched_units')

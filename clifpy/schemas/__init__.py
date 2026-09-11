@@ -111,5 +111,5 @@ def load_schema(
         logger.warning("Schema file not found: %s", path)
         return None
 
-    with open(path, 'r') as f:
+    with open(path, 'r', encoding='utf-8') as f:
         return yaml.safe_load(f)

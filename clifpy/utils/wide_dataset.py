@@ -50,7 +50,7 @@ def _load_wide_tables_config() -> Dict:
                 "Please ensure clifpy/schemas/wide_tables_config.yaml exists."
             )
 
-        with open(config_path, 'r') as f:
+        with open(config_path, 'r', encoding='utf-8') as f:
             _WIDE_TABLES_CONFIG = yaml.safe_load(f)
 
     return _WIDE_TABLES_CONFIG

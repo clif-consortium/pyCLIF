@@ -1631,7 +1631,7 @@ def compute_ase(
     config = {}
     if config_path:
         config_path = Path(config_path) if isinstance(config_path, str) else config_path
-        with open(config_path) as f:
+        with open(config_path, encoding='utf-8') as f:
             config = json.load(f)
         # Extract parameters from config
         data_directory = data_directory or config.get('data_directory') or config.get('tables_path')

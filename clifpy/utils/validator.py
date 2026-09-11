@@ -67,7 +67,7 @@ def _load_schema(
         if not os.path.exists(schema_file):
             _logger.warning("Schema file not found: %s", schema_file)
             return None
-        with open(schema_file, 'r') as f:
+        with open(schema_file, 'r', encoding='utf-8') as f:
             return yaml.safe_load(f)
 
     return load_schema(table_name, clif_version)
@@ -1043,23 +1043,30 @@ def _resolve_accepted_units(schema: Dict[str, Any], ref_unit_entry: Any) -> List
           allowed_unit_variants:
             g/dl: [g/dl, g per dl, gram/dl, ...]
 
-    * Legacy list format — ``lab_reference_units`` maps each category to a
-      pre-expanded list of accepted spellings.
+    * List format — ``lab_reference_units`` maps a category to several units,
+      for analytes CLIF reports in more than one unit (albumin is g/dl in
+      blood, mg/dl in urine). Each entry is expanded against
+      ``allowed_unit_variants`` the same way; an entry with no variants key is
+      taken literally, which keeps legacy pre-expanded spelling lists working.
 
-    The return is deduplicated and always includes the canonical key itself.
+    The return is deduplicated and always includes the canonical keys themselves.
     Returns an empty list for unrecognized (None / non-str, non-list) inputs.
     """
-    if isinstance(ref_unit_entry, (list, tuple)):
-        return sorted({str(u).lower().strip() for u in ref_unit_entry if u is not None})
-    if not isinstance(ref_unit_entry, str):
+    if isinstance(ref_unit_entry, str):
+        canonicals = [ref_unit_entry]
+    elif isinstance(ref_unit_entry, (list, tuple)):
+        canonicals = [u for u in ref_unit_entry if u is not None]
+    else:
         return []
-    canonical = ref_unit_entry.lower().strip()
     variants_map = schema.get('allowed_unit_variants') or {}
     variants_map_norm = {str(k).lower().strip(): v for k, v in variants_map.items()}
-    variants = variants_map_norm.get(canonical)
-    if variants:
-        return sorted({str(u).lower().strip() for u in variants if u is not None} | {canonical})
-    return [canonical]
+    accepted = set()
+    for unit in canonicals:
+        canonical = str(unit).lower().strip()
+        accepted.add(canonical)
+        variants = variants_map_norm.get(canonical) or []
+        accepted.update(str(v).lower().strip() for v in variants if v is not None)
+    return sorted(accepted)
 
 
 def _log_lab_reference_units_schema_summary(
@@ -1116,7 +1123,7 @@ def _evaluate_lab_category_units(
         Original-case category key, for user-facing messages.
     expected_units_entry
         The schema's ``lab_reference_units`` value for this category — either
-        a canonical key string or a legacy list.
+        a canonical key string or a list of them.
     actual_pairs
         List of ``(ref_unit, ref_unit_orig, lab_cat_orig, count)`` tuples
         from the data, with ``ref_unit`` already lowercased+stripped.
@@ -1132,14 +1139,15 @@ def _evaluate_lab_category_units(
     """
     accepted = _resolve_accepted_units(schema, expected_units_entry)
     if isinstance(expected_units_entry, str):
-        canonical = expected_units_entry.lower().strip()
+        canonicals = [expected_units_entry.lower().strip()]
     elif isinstance(expected_units_entry, (list, tuple)) and expected_units_entry:
-        canonical = str(expected_units_entry[0]).lower().strip()
+        canonicals = [str(u).lower().strip() for u in expected_units_entry if u is not None]
     else:
-        canonical = accepted[0] if accepted else ''
+        canonicals = accepted[:1]
+    canonical = canonicals[0] if canonicals else ''
 
     variants_map = schema.get('allowed_unit_variants') or {}
-    variant_lookup_used = bool(variants_map) and isinstance(expected_units_entry, str)
+    variant_lookup_used = bool(variants_map) and isinstance(expected_units_entry, (str, list, tuple))
     no_units = '(no units)' in accepted
 
     matched_canonical = 0
@@ -1149,7 +1157,7 @@ def _evaluate_lab_category_units(
         if no_units and not ref_unit:
             matched_canonical += count
             continue
-        if ref_unit == canonical:
+        if ref_unit in canonicals:
             matched_canonical += count
         elif ref_unit in accepted:
             matched_via_variant += count
@@ -1167,6 +1175,7 @@ def _evaluate_lab_category_units(
     details = {
         "column": lab_cat_orig_key,
         "canonical_unit": canonical,
+        "canonical_units": canonicals,
         "variant_lookup_used": variant_lookup_used,
         "accepted_variant_count": len(accepted),
         "accepted_variants_sample": sample,
@@ -2134,7 +2143,7 @@ def _load_validation_rules() -> Dict[str, Any]:
     if not os.path.exists(rules_path):
         _logger.warning("Validation rules file not found: %s", rules_path)
         return {}
-    with open(rules_path, 'r') as f:
+    with open(rules_path, 'r', encoding='utf-8') as f:
         return yaml.safe_load(f) or {}
 
 
@@ -2602,7 +2611,7 @@ def _load_outlier_config() -> Dict[str, Any]:
     if not os.path.exists(config_path):
         _logger.warning("Outlier config file not found: %s", config_path)
         return {}
-    with open(config_path, 'r') as f:
+    with open(config_path, 'r', encoding='utf-8') as f:
         return yaml.safe_load(f) or {}
 
 

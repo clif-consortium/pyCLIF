@@ -483,6 +483,46 @@ class TestCheckLabReferenceUnits:
         assert len(result.warnings) > 0
         assert result.metrics["invalid_unit_categories"] == 1
 
+    def test_invalid_unit_finding_shows_expected_and_found(self, labs_schema_canonical):
+        # The report line must name the expected unit and the observed one,
+        # never a '?' placeholder for the category.
+        from clifpy.utils.rule_codes import build_finding
+        lf = pl.LazyFrame({
+            "hospitalization_id": ["h1"],
+            "lab_category": ["albumin"],
+            "reference_unit": ["mg/L"],
+            "lab_value": ["3.5"],
+        })
+        result = check_lab_reference_units_polars(lf, labs_schema_canonical, "labs")
+        warning = result.warnings[0]
+        finding = build_finding(warning["message"], warning["details"])
+        assert "?" not in finding
+        assert "Expected 'g/dl'; found 'mg/L' (1 rows)" in finding
+
+    def test_multi_unit_entry_accepts_each_unit_and_its_variants(self, labs_schema_canonical):
+        # albumin is g/dl in blood but mg/dl in urine: both units, and each
+        # one's spellings, pass; anything else is still flagged.
+        from clifpy.utils.rule_codes import build_finding
+        schema = {**labs_schema_canonical, "lab_reference_units": {"albumin": ["g/dl", "mg/dl"]}}
+        ok = pl.LazyFrame({
+            "hospitalization_id": ["h1", "h2", "h3", "h4"],
+            "lab_category": ["albumin"] * 4,
+            "reference_unit": ["g/dL", "mg/dL", "gram/dl", "mg per dl"],
+            "lab_value": ["3.5", "30", "3.6", "31"],
+        })
+        result = check_lab_reference_units_polars(ok, schema, "labs")
+        assert result.metrics["invalid_unit_categories"] == 0, result.warnings
+
+        bad = pl.LazyFrame({
+            "hospitalization_id": ["h1"],
+            "lab_category": ["albumin"],
+            "reference_unit": ["mg/L"],
+            "lab_value": ["300"],
+        })
+        warning = check_lab_reference_units_polars(bad, schema, "labs").warnings[0]
+        finding = build_finding(warning["message"], warning["details"])
+        assert "Expected 'g/dl' or 'mg/dl'; found 'mg/L' (1 rows)" in finding
+
     def test_canonical_no_units_sentinel_polars(self, labs_schema_canonical):
         # '(no units)' canonical accepts empty reference_unit values.
         lf = pl.LazyFrame({

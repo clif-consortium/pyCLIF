@@ -86,7 +86,7 @@ def _load_outlier_config(config_path: Optional[str] = None) -> Optional[Dict[str
             print(f"Outlier configuration file not found: {config_path}")
             return None
 
-        with open(config_path, 'r') as f:
+        with open(config_path, 'r', encoding='utf-8') as f:
             return yaml.safe_load(f)
 
     except Exception as e:

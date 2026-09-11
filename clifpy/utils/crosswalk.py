@@ -122,7 +122,7 @@ def load_crosswalk(crosswalk_path: Optional[str] = None) -> Dict[str, Any]:
     else:
         path = crosswalk_path
 
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
     data.setdefault("renames", {})
     data.setdefault("unresolved", {})

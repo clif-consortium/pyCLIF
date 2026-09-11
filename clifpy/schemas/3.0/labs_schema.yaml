@@ -230,13 +230,14 @@ category_columns:
 
 group_columns: []
 
-# Each lab category mapped to its canonical (lowercase) reference unit key.
-# Rebuilt from /tmp/mCIDE/labs/clif_lab_categories.csv 'reference_unit' column
-# (first reference_unit listed per lab_category). Look up the canonical key in
-# allowed_unit_variants below to find all accepted spellings.
+# Each lab category mapped to its canonical (lowercase) reference unit key,
+# from mCIDE/labs/clif_lab_categories.csv 'reference_unit'. Analytes CLIF
+# reports in more than one unit (one CSV row per unit, split by specimen, e.g.
+# albumin is g/dl in blood but mg/dl in urine) list every unit. Look up each
+# key in allowed_unit_variants below to find all accepted spellings.
 lab_reference_units:
   ada: u/l
-  albumin: g/dl
+  albumin: [g/dl, mg/dl]
   albumin_to_creatinine_ratio: mg/g
   alkaline_phosphatase: u/l
   alt: u/l
@@ -264,7 +265,7 @@ lab_reference_units:
   crp: mg/l
   cystatin_c: mg/l
   d_dimer: ug/ml
-  eosinophils_absolute: 10^3/ul
+  eosinophils_absolute: [10^3/ul, cells/ul]
   eosinophils_percent: "%"
   esr: mm/hour
   ethanol: (no units)
@@ -292,7 +293,7 @@ lab_reference_units:
   lactate: mmol/l
   ldh: u/l
   lipase: u/l
-  lymphocytes_absolute: 10^3/ul
+  lymphocytes_absolute: [10^3/ul, cells/ul]
   lymphocytes_percent: "%"
   macrophages_percent: "%"
   magnesium: mg/dl
@@ -301,7 +302,7 @@ lab_reference_units:
   monocytes_absolute: 10^3/ul
   monocytes_percent: "%"
   nag: u/l
-  neutrophils_absolute: 10^3/ul
+  neutrophils_absolute: [10^3/ul, cells/ul]
   neutrophils_percent: "%"
   ngal: ng/ml
   neuron_specific_enolase: ng/ml
@@ -323,7 +324,7 @@ lab_reference_units:
   po2_mixed_venous: mmhg
   potassium: mmol/l
   procalcitonin: ng/ml
-  protein: g/dl
+  protein: [g/dl, mg/dl]
   protein_to_creatinine_ratio: mg/g
   pt: sec
   ptt: sec
@@ -341,7 +342,7 @@ lab_reference_units:
   troponin_i: ng/l
   troponin_t: ng/l
   tsh: miu/l
-  wbc: 10^3/ul
+  wbc: [10^3/ul, cells/ul]
   wbc_absolute: cells/ul
 
 # Per-category outlier bounds used for filtering implausible values before
