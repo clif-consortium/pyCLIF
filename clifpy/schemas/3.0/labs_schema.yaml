@@ -40,6 +40,7 @@ columns:
       - cardiac
       - cbc
       - coags
+      - fingerstick
       - inflammatory
       - lft
       - misc
@@ -85,7 +86,6 @@ columns:
       - chloride
       - cholesterol
       - ckmb
-      - co2
       - cocaine
       - creatinine
       - crp
@@ -145,6 +145,8 @@ columns:
       - plasma_absolute
       - platelet_count
       - po2_arterial
+      - po2_ecmo_post
+      - po2_ecmo_pre
       - po2_mixed_venous
       - potassium
       - procalcitonin
@@ -257,7 +259,6 @@ lab_reference_units:
   chloride: mmol/l
   cholesterol: mg/dl
   ckmb: ng/ml
-  co2: mmol/l
   cocaine: (no units)
   creatinine: mg/dl
   crp: mg/l
@@ -273,7 +274,6 @@ lab_reference_units:
   free_t3: pg/ml
   free_t4: ng/dl
   glucose: mg/dl
-  glucose_serum: mg/dl
   hematocrit: "%"
   hematocrit_percent: "%"
   hemoglobin: g/dl
@@ -318,6 +318,8 @@ lab_reference_units:
   plasma_absolute: cells/ul
   platelet_count: 10^3/ul
   po2_arterial: mmhg
+  po2_ecmo_post: mmhg
+  po2_ecmo_pre: mmhg
   po2_mixed_venous: mmhg
   potassium: mmol/l
   procalcitonin: ng/ml
@@ -592,6 +594,13 @@ allowed_unit_variants:
   pg/l:
     - pg/l
     - picograms per liter
+  # NephroCheck [TIMP-2]·[IGFBP7] product (timp_2_igfbp7)
+  (ng/ml)^2/1000:
+    - (ng/ml)^2/1000
+    - "(ng/ml)²/1000"
+    - (ng/ml)2/1000
+    - "[(ng/ml)^2]/1000"
+    - "[(ng/ml)²]/1000"
   mmhg:
     - mmhg
     - mm hg

@@ -181,6 +181,17 @@ def test_30_med_dose_unit_mappings_consistent(table, expected_count):
         assert s["expected_volume_infusion_rate_unit"] == "ml/hr"
 
 
+def test_30_lab_reference_units_consistent():
+    # Every lab_category needs a reference unit, and every reference unit needs
+    # an allowed_unit_variants key, or only its exact spelling is accepted.
+    s = yaml.safe_load(open(os.path.join(SCHEMAS_ROOT, "3.0", "labs_schema.yaml"), encoding="utf-8"))
+    units = s["lab_reference_units"]
+    cats = next(c for c in s["columns"] if c["name"] == "lab_category")["permissible_values"]
+    assert set(units) == set(cats)
+    missing = {cat: u for cat, u in units.items() if u not in s["allowed_unit_variants"]}
+    assert not missing, missing
+
+
 def test_all_30_tables_registered():
     files = {os.path.basename(f).replace("_schema.yaml", "")
              for f in glob.glob(os.path.join(SCHEMAS_ROOT, "3.0", "*_schema.yaml"))}
